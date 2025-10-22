@@ -1,7 +1,7 @@
 {
   "name": "twilio-n8n-bridge",
   "version": "1.0.0",
-  "description": "WebSocket bridge between Twilio Media Streams and n8n",
+  "description": "WebSocket bridge between Twilio Media Streams and n8n with MP3 to mulaw conversion",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
@@ -15,5 +15,8 @@
   },
   "engines": {
     "node": "18.x"
+  },
+  "nixpacks": {
+    "pkgs": ["ffmpeg"]
   }
 }
