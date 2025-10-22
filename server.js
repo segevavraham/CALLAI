@@ -2,6 +2,9 @@
 const express = require('express');
 const WebSocket = require('ws');
 const axios = require('axios');
+const { spawn } = require('child_process');
+const fs = require('fs').promises;
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -95,6 +98,79 @@ wss.on('connection', (ws) => {
   });
 });
 
+// 🎵 פונקציה להמיר MP3 ל-mulaw באמצעות ffmpeg
+async function convertMp3ToMulaw(mp3Base64) {
+  const tempDir = '/tmp';
+  const timestamp = Date.now();
+  const mp3Path = path.join(tempDir, `audio_${timestamp}.mp3`);
+  const mulawPath = path.join(tempDir, `audio_${timestamp}.ulaw`);
+
+  try {
+    console.log('🔄 Starting MP3 to mulaw conversion');
+    
+    // כתוב MP3 לקובץ זמני
+    const mp3Buffer = Buffer.from(mp3Base64, 'base64');
+    await fs.writeFile(mp3Path, mp3Buffer);
+    console.log('📝 MP3 file written:', mp3Path, 'size:', mp3Buffer.length);
+
+    // המר באמצעות ffmpeg
+    await new Promise((resolve, reject) => {
+      const ffmpeg = spawn('ffmpeg', [
+        '-i', mp3Path,
+        '-ar', '8000',      // 8kHz sample rate (Twilio requirement)
+        '-ac', '1',         // mono
+        '-f', 'mulaw',      // output format
+        mulawPath,
+        '-y'                // overwrite output file
+      ]);
+
+      let stderr = '';
+      ffmpeg.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          console.log('✅ ffmpeg conversion successful');
+          resolve();
+        } else {
+          console.error('❌ ffmpeg error output:', stderr);
+          reject(new Error(`ffmpeg exited with code ${code}`));
+        }
+      });
+
+      ffmpeg.on('error', (err) => {
+        console.error('❌ ffmpeg spawn error:', err);
+        reject(err);
+      });
+    });
+
+    // קרא את קובץ ה-mulaw
+    const mulawBuffer = await fs.readFile(mulawPath);
+    const mulawBase64 = mulawBuffer.toString('base64');
+    
+    console.log('✅ Conversion complete:', {
+      mp3Size: mp3Buffer.length,
+      mulawSize: mulawBuffer.length,
+      mulawBase64Length: mulawBase64.length
+    });
+
+    // נקה קבצים זמניים
+    await fs.unlink(mp3Path).catch(() => {});
+    await fs.unlink(mulawPath).catch(() => {});
+
+    return mulawBase64;
+  } catch (error) {
+    console.error('❌ Conversion error:', error.message);
+    
+    // נקה קבצים זמניים במקרה של שגיאה
+    await fs.unlink(mp3Path).catch(() => {});
+    await fs.unlink(mulawPath).catch(() => {});
+    
+    throw error;
+  }
+}
+
 // פונקציה לשליחת הודעת פתיחה
 async function sendWelcomeMessage(callSid, streamSid, ws) {
   try {
@@ -110,7 +186,7 @@ async function sendWelcomeMessage(callSid, streamSid, ws) {
       welcomeMessage: true
     };
     
-    console.log('📤 Payload:', JSON.stringify(payload, null, 2));
+    console.log('📤 Sending welcome request...');
     
     const response = await axios.post(N8N_WEBHOOK_URL, payload, {
       timeout: 30000,
@@ -119,15 +195,24 @@ async function sendWelcomeMessage(callSid, streamSid, ws) {
       }
     });
 
-    console.log('📥 Response status:', response.status);
-    console.log('📥 Response data:', JSON.stringify(response.data, null, 2));
+    console.log('📥 Response received:', {
+      status: response.status,
+      format: response.data.format,
+      hasAudio: !!response.data.audio
+    });
 
     if (response.data.success && response.data.audio) {
+      let audioPayload = response.data.audio;
+      
+      // בדוק אם צריך להמיר MP3 ל-mulaw
+      if (response.data.format === 'mp3') {
+        console.log('🔄 Converting MP3 welcome message to mulaw...');
+        audioPayload = await convertMp3ToMulaw(audioPayload);
+      }
+      
       console.log('🔊 Sending Hebrew welcome audio to caller');
       
-      const audioPayload = response.data.audio;
       const chunkSize = 160;
-      
       for (let i = 0; i < audioPayload.length; i += chunkSize) {
         const chunk = audioPayload.substr(i, chunkSize);
         
@@ -148,9 +233,7 @@ async function sendWelcomeMessage(callSid, streamSid, ws) {
     console.error('❌ Error sending welcome message:');
     console.error('   Message:', error.message);
     console.error('   Status:', error.response?.status);
-    console.error('   Status Text:', error.response?.statusText);
-    console.error('   Response Data:', error.response?.data);
-    console.error('   URL attempted:', N8N_WEBHOOK_URL);
+    console.error('   Response Data:', JSON.stringify(error.response?.data, null, 2));
   }
 }
 
@@ -168,12 +251,25 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       timeout: 30000
     });
 
+    console.log('📥 n8n response:', {
+      success: response.data.success,
+      format: response.data.format,
+      textLength: response.data.text?.length,
+      audioLength: response.data.audio?.length
+    });
+
     if (response.data.success && response.data.audio) {
-      console.log(`🔊 Sending audio response to Twilio`);
+      let audioPayload = response.data.audio;
       
-      const audioPayload = response.data.audio;
+      // בדוק אם צריך להמיר MP3 ל-mulaw
+      if (response.data.format === 'mp3') {
+        console.log('🔄 Converting MP3 response to mulaw...');
+        audioPayload = await convertMp3ToMulaw(audioPayload);
+      }
+      
+      console.log(`🔊 Sending audio response to Twilio (${audioPayload.length} chars)`);
+      
       const chunkSize = 160;
-      
       for (let i = 0; i < audioPayload.length; i += chunkSize) {
         const chunk = audioPayload.substr(i, chunkSize);
         
@@ -187,8 +283,14 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       }
       
       console.log(`✅ Audio sent successfully`);
+    } else {
+      console.error('⚠️ Invalid response from n8n:', response.data);
     }
   } catch (error) {
     console.error('❌ Error processing audio:', error.message);
+    if (error.response) {
+      console.error('   Response status:', error.response.status);
+      console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+    }
   }
 }
