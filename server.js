@@ -99,17 +99,28 @@ wss.on('connection', (ws) => {
 async function sendWelcomeMessage(callSid, streamSid, ws) {
   try {
     console.log('👋 Generating Hebrew welcome message via n8n');
+    console.log('📡 Sending to URL:', N8N_WEBHOOK_URL);
     
     const silenceBase64 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     
-    const response = await axios.post(N8N_WEBHOOK_URL, {
+    const payload = {
       callSid,
       streamSid,
       audioData: silenceBase64,
       welcomeMessage: true
-    }, {
-      timeout: 30000
+    };
+    
+    console.log('📤 Payload:', JSON.stringify(payload, null, 2));
+    
+    const response = await axios.post(N8N_WEBHOOK_URL, payload, {
+      timeout: 30000,
+      headers: {
+        'Content-Type': 'application/json'
+      }
     });
+
+    console.log('📥 Response status:', response.status);
+    console.log('📥 Response data:', JSON.stringify(response.data, null, 2));
 
     if (response.data.success && response.data.audio) {
       console.log('🔊 Sending Hebrew welcome audio to caller');
@@ -130,9 +141,16 @@ async function sendWelcomeMessage(callSid, streamSid, ws) {
       }
       
       console.log('✅ Welcome message sent successfully');
+    } else {
+      console.error('⚠️ Response missing success or audio field');
     }
   } catch (error) {
-    console.error('❌ Error sending welcome message:', error.message);
+    console.error('❌ Error sending welcome message:');
+    console.error('   Message:', error.message);
+    console.error('   Status:', error.response?.status);
+    console.error('   Status Text:', error.response?.statusText);
+    console.error('   Response Data:', error.response?.data);
+    console.error('   URL attempted:', N8N_WEBHOOK_URL);
   }
 }
 
