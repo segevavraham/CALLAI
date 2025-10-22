@@ -16,9 +16,9 @@ const activeCalls = new Map();
 app.get('/voice', (req, res) => {
   const wsUrl = `wss://${req.get('host')}/media-stream`;
   
+  // ללא Say - מתחבר ישירות ל-WebSocket
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Hiujin" language="he-IL">שלום, אני הסוכן הדיגיטלי. במה אוכל לעזור?</Say>
     <Connect>
         <Stream url="${wsUrl}" />
     </Connect>
@@ -86,6 +86,48 @@ wss.on('connection', (ws) => {
     clearTimeout(silenceTimeout);
   });
 });
+
+// פונקציה לשליחת הודעת פתיחה
+async function sendWelcomeMessage(callSid, streamSid, ws) {
+  try {
+    console.log('👋 Generating Hebrew welcome message via n8n');
+    
+    // יצירת אודיו דמה (שקט) - רק כדי להפעיל את n8n
+    const silenceBase64 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    
+    const response = await axios.post(N8N_WEBHOOK_URL, {
+      callSid,
+      streamSid,
+      audioData: silenceBase64,
+      welcomeMessage: true
+    }, {
+      timeout: 30000
+    });
+
+    if (response.data.success && response.data.audio) {
+      console.log('🔊 Sending Hebrew welcome audio to caller');
+      
+      const audioPayload = response.data.audio;
+      const chunkSize = 160;
+      
+      for (let i = 0; i < audioPayload.length; i += chunkSize) {
+        const chunk = audioPayload.substr(i, chunkSize);
+        
+        ws.send(JSON.stringify({
+          event: 'media',
+          streamSid: streamSid,
+          media: {
+            payload: chunk
+          }
+        }));
+      }
+      
+      console.log('✅ Welcome message sent successfully');
+    }
+  } catch (error) {
+    console.error('❌ Error sending welcome message:', error.message);
+  }
+}
 
 async function processAudio(callSid, streamSid, audioChunks, ws) {
   try {
