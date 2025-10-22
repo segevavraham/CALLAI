@@ -7,7 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ⚙️ הגדרות - עדכן את אלו
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://segevavraham.app.n8n.cloud/webhook/twilio-process-audio';
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://YOUR-N8N-INSTANCE.app.n8n.cloud/webhook/twilio-process-audio';
 
 // אחסון זמני של חיבורי WebSocket פעילים
 const activeCalls = new Map();
