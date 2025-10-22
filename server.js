@@ -1,4 +1,4 @@
-// Twilio Media Streams <-> n8n WebSocket Bridge
+// Twilio Media Streams <-> n8n WebSocket Bridge - OPTIMIZED FOR REAL-TIME
 const express = require('express');
 const WebSocket = require('ws');
 const axios = require('axios');
@@ -9,8 +9,11 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ⚙️ הגדרות
+// ⚙️ הגדרות - OPTIMIZED
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://segevavraham.app.n8n.cloud/webhook/twilio-process-audio';
+const SILENCE_TIMEOUT = 600; // 600ms instead of 1500ms - much faster! ⚡
+const MIN_AUDIO_CHUNKS = 10; // Minimum chunks before processing
+const CHUNK_SIZE = 160; // Twilio standard
 
 // אחסון זמני של חיבורי WebSocket פעילים
 const activeCalls = new Map();
@@ -33,7 +36,8 @@ app.get('/voice', (req, res) => {
 // הפעל HTTP server
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Twilio-n8n WebSocket Bridge is ready!`);
+  console.log(`🎯 Twilio-n8n WebSocket Bridge - OPTIMIZED`);
+  console.log(`⚡ Silence timeout: ${SILENCE_TIMEOUT}ms`);
 });
 
 // הפעל WebSocket server
@@ -47,6 +51,8 @@ wss.on('connection', (ws) => {
   let audioBuffer = [];
   let silenceTimeout = null;
   let welcomeSent = false;
+  let isProcessing = false; // Prevent multiple simultaneous processing
+  let currentAudioPlaying = false; // Track if AI is speaking
 
   ws.on('message', async (message) => {
     try {
@@ -57,27 +63,44 @@ wss.on('connection', (ws) => {
           callSid = msg.start.callSid;
           streamSid = msg.start.streamSid;
           console.log(`📞 Call started: ${callSid}`);
-          activeCalls.set(callSid, { ws, streamSid });
+          activeCalls.set(callSid, { ws, streamSid, audioBuffer: [], isProcessing: false });
           
           // שלח הודעת פתיחה בעברית מיד!
           if (!welcomeSent) {
             welcomeSent = true;
+            console.log('👋 Sending welcome message in 300ms...');
             setTimeout(() => {
               sendWelcomeMessage(callSid, streamSid, ws);
-            }, 500);
+            }, 300);
           }
           break;
 
         case 'media':
+          // אם AI מדבר - ignore user audio (prevent interruption feedback loop)
+          if (currentAudioPlaying) {
+            break;
+          }
+
           audioBuffer.push(msg.media.payload);
           
+          // ⚡ FASTER VAD - 600ms instead of 1500ms
           clearTimeout(silenceTimeout);
           silenceTimeout = setTimeout(async () => {
-            if (audioBuffer.length > 0) {
-              await processAudio(callSid, streamSid, audioBuffer, ws);
+            // Only process if we have enough audio AND not currently processing
+            if (audioBuffer.length >= MIN_AUDIO_CHUNKS && !isProcessing) {
+              isProcessing = true;
+              const chunksToProcess = [...audioBuffer];
+              audioBuffer = [];
+              
+              console.log(`🎤 Processing ${chunksToProcess.length} audio chunks`);
+              await processAudio(callSid, streamSid, chunksToProcess, ws);
+              
+              isProcessing = false;
+            } else if (audioBuffer.length < MIN_AUDIO_CHUNKS) {
+              console.log(`⏭️  Skipping - only ${audioBuffer.length} chunks (need ${MIN_AUDIO_CHUNKS})`);
               audioBuffer = [];
             }
-          }, 1500);
+          }, SILENCE_TIMEOUT);
           break;
 
         case 'stop':
@@ -106,12 +129,9 @@ async function convertMp3ToMulaw(mp3Base64) {
   const mulawPath = path.join(tempDir, `audio_${timestamp}.ulaw`);
 
   try {
-    console.log('🔄 Starting MP3 to mulaw conversion');
-    
     // כתוב MP3 לקובץ זמני
     const mp3Buffer = Buffer.from(mp3Base64, 'base64');
     await fs.writeFile(mp3Path, mp3Buffer);
-    console.log('📝 MP3 file written:', mp3Path, 'size:', mp3Buffer.length);
 
     // המר באמצעות ffmpeg
     await new Promise((resolve, reject) => {
@@ -131,16 +151,14 @@ async function convertMp3ToMulaw(mp3Base64) {
 
       ffmpeg.on('close', (code) => {
         if (code === 0) {
-          console.log('✅ ffmpeg conversion successful');
           resolve();
         } else {
-          console.error('❌ ffmpeg error output:', stderr);
+          console.error('❌ ffmpeg error:', stderr);
           reject(new Error(`ffmpeg exited with code ${code}`));
         }
       });
 
       ffmpeg.on('error', (err) => {
-        console.error('❌ ffmpeg spawn error:', err);
         reject(err);
       });
     });
@@ -149,10 +167,9 @@ async function convertMp3ToMulaw(mp3Base64) {
     const mulawBuffer = await fs.readFile(mulawPath);
     const mulawBase64 = mulawBuffer.toString('base64');
     
-    console.log('✅ Conversion complete:', {
-      mp3Size: mp3Buffer.length,
-      mulawSize: mulawBuffer.length,
-      mulawBase64Length: mulawBase64.length
+    console.log('✅ Converted:', {
+      mp3: mp3Buffer.length,
+      mulaw: mulawBuffer.length
     });
 
     // נקה קבצים זמניים
@@ -163,7 +180,6 @@ async function convertMp3ToMulaw(mp3Base64) {
   } catch (error) {
     console.error('❌ Conversion error:', error.message);
     
-    // נקה קבצים זמניים במקרה של שגיאה
     await fs.unlink(mp3Path).catch(() => {});
     await fs.unlink(mulawPath).catch(() => {});
     
@@ -174,8 +190,7 @@ async function convertMp3ToMulaw(mp3Base64) {
 // פונקציה לשליחת הודעת פתיחה
 async function sendWelcomeMessage(callSid, streamSid, ws) {
   try {
-    console.log('👋 Generating Hebrew welcome message via n8n');
-    console.log('📡 Sending to URL:', N8N_WEBHOOK_URL);
+    console.log('💬 Generating Hebrew welcome message via n8n');
     
     const silenceBase64 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     
@@ -186,8 +201,6 @@ async function sendWelcomeMessage(callSid, streamSid, ws) {
       welcomeMessage: true
     };
     
-    console.log('📤 Sending welcome request...');
-    
     const response = await axios.post(N8N_WEBHOOK_URL, payload, {
       timeout: 30000,
       headers: {
@@ -195,53 +208,31 @@ async function sendWelcomeMessage(callSid, streamSid, ws) {
       }
     });
 
-    console.log('📥 Response received:', {
-      status: response.status,
-      format: response.data.format,
-      hasAudio: !!response.data.audio
-    });
-
     if (response.data.success && response.data.audio) {
       let audioPayload = response.data.audio;
       
-      // בדוק אם צריך להמיר MP3 ל-mulaw
+      // המר MP3 ל-mulaw
       if (response.data.format === 'mp3') {
-        console.log('🔄 Converting MP3 welcome message to mulaw...');
+        console.log('🔄 Converting welcome MP3 to mulaw...');
         audioPayload = await convertMp3ToMulaw(audioPayload);
       }
       
-      console.log('🔊 Sending Hebrew welcome audio to caller');
-      
-      const chunkSize = 160;
-      for (let i = 0; i < audioPayload.length; i += chunkSize) {
-        const chunk = audioPayload.substr(i, chunkSize);
-        
-        ws.send(JSON.stringify({
-          event: 'media',
-          streamSid: streamSid,
-          media: {
-            payload: chunk
-          }
-        }));
-      }
-      
-      console.log('✅ Welcome message sent successfully');
-    } else {
-      console.error('⚠️ Response missing success or audio field');
+      console.log('🔊 Playing welcome message');
+      await sendAudioToTwilio(ws, streamSid, audioPayload);
+      console.log('✅ Welcome message complete');
     }
   } catch (error) {
-    console.error('❌ Error sending welcome message:');
-    console.error('   Message:', error.message);
-    console.error('   Status:', error.response?.status);
-    console.error('   Response Data:', JSON.stringify(error.response?.data, null, 2));
+    console.error('❌ Error sending welcome:', error.message);
   }
 }
 
 async function processAudio(callSid, streamSid, audioChunks, ws) {
+  const startTime = Date.now();
+  
   try {
     const audioBase64 = audioChunks.join('');
     
-    console.log(`🎤 Processing audio for call ${callSid}`);
+    console.log(`🎤 Processing audio for ${callSid} (${audioChunks.length} chunks)`);
 
     const response = await axios.post(N8N_WEBHOOK_URL, {
       callSid,
@@ -251,46 +242,57 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       timeout: 30000
     });
 
-    console.log('📥 n8n response:', {
-      success: response.data.success,
-      format: response.data.format,
-      textLength: response.data.text?.length,
-      audioLength: response.data.audio?.length
-    });
+    const n8nTime = Date.now() - startTime;
+    console.log(`📥 n8n responded in ${n8nTime}ms`);
 
     if (response.data.success && response.data.audio) {
       let audioPayload = response.data.audio;
       
-      // בדוק אם צריך להמיר MP3 ל-mulaw
+      // המר MP3 ל-mulaw
       if (response.data.format === 'mp3') {
-        console.log('🔄 Converting MP3 response to mulaw...');
+        const convertStart = Date.now();
+        console.log('🔄 Converting response MP3 to mulaw...');
         audioPayload = await convertMp3ToMulaw(audioPayload);
+        console.log(`✅ Converted in ${Date.now() - convertStart}ms`);
       }
       
-      console.log(`🔊 Sending audio response to Twilio (${audioPayload.length} chars)`);
+      const totalTime = Date.now() - startTime;
+      console.log(`🔊 Sending response (total: ${totalTime}ms)`);
       
-      const chunkSize = 160;
-      for (let i = 0; i < audioPayload.length; i += chunkSize) {
-        const chunk = audioPayload.substr(i, chunkSize);
-        
-        ws.send(JSON.stringify({
-          event: 'media',
-          streamSid: streamSid,
-          media: {
-            payload: chunk
-          }
-        }));
-      }
+      await sendAudioToTwilio(ws, streamSid, audioPayload);
       
-      console.log(`✅ Audio sent successfully`);
+      console.log(`✅ Complete response cycle: ${Date.now() - startTime}ms`);
     } else {
-      console.error('⚠️ Invalid response from n8n:', response.data);
+      console.error('⚠️  Invalid response from n8n');
     }
   } catch (error) {
     console.error('❌ Error processing audio:', error.message);
     if (error.response) {
-      console.error('   Response status:', error.response.status);
-      console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+      console.error('   Status:', error.response.status);
+      console.error('   Data:', JSON.stringify(error.response.data, null, 2));
+    }
+  }
+}
+
+// Helper function to send audio to Twilio
+async function sendAudioToTwilio(ws, streamSid, audioBase64) {
+  const chunks = Math.ceil(audioBase64.length / CHUNK_SIZE);
+  console.log(`📤 Sending ${chunks} audio chunks to Twilio`);
+  
+  for (let i = 0; i < audioBase64.length; i += CHUNK_SIZE) {
+    const chunk = audioBase64.substr(i, CHUNK_SIZE);
+    
+    ws.send(JSON.stringify({
+      event: 'media',
+      streamSid: streamSid,
+      media: {
+        payload: chunk
+      }
+    }));
+    
+    // Small delay between chunks to avoid overwhelming Twilio
+    if (i % (CHUNK_SIZE * 10) === 0) {
+      await new Promise(resolve => setTimeout(resolve, 10));
     }
   }
 }
