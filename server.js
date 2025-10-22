@@ -6,8 +6,8 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ⚙️ הגדרות - עדכן את אלו
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://YOUR-N8N-INSTANCE.app.n8n.cloud/webhook/twilio-process-audio';
+// ⚙️ הגדרות
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://segevavraham.app.n8n.cloud/webhook/twilio-process-audio';
 
 // אחסון זמני של חיבורי WebSocket פעילים
 const activeCalls = new Map();
@@ -16,7 +16,6 @@ const activeCalls = new Map();
 app.get('/voice', (req, res) => {
   const wsUrl = `wss://${req.get('host')}/media-stream`;
   
-  // ללא Say - מתחבר ישירות ל-WebSocket
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
@@ -31,7 +30,7 @@ app.get('/voice', (req, res) => {
 // הפעל HTTP server
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📞 Twilio Voice URL: https://YOUR-DOMAIN.com/voice`);
+  console.log(`🎯 Twilio-n8n WebSocket Bridge is ready!`);
 });
 
 // הפעל WebSocket server
@@ -44,6 +43,7 @@ wss.on('connection', (ws) => {
   let streamSid = null;
   let audioBuffer = [];
   let silenceTimeout = null;
+  let welcomeSent = false;
 
   ws.on('message', async (message) => {
     try {
@@ -55,6 +55,14 @@ wss.on('connection', (ws) => {
           streamSid = msg.start.streamSid;
           console.log(`📞 Call started: ${callSid}`);
           activeCalls.set(callSid, { ws, streamSid });
+          
+          // שלח הודעת פתיחה בעברית מיד!
+          if (!welcomeSent) {
+            welcomeSent = true;
+            setTimeout(() => {
+              sendWelcomeMessage(callSid, streamSid, ws);
+            }, 500);
+          }
           break;
 
         case 'media':
@@ -66,7 +74,7 @@ wss.on('connection', (ws) => {
               await processAudio(callSid, streamSid, audioBuffer, ws);
               audioBuffer = [];
             }
-          }, 500);
+          }, 1500);
           break;
 
         case 'stop':
@@ -92,7 +100,6 @@ async function sendWelcomeMessage(callSid, streamSid, ws) {
   try {
     console.log('👋 Generating Hebrew welcome message via n8n');
     
-    // יצירת אודיו דמה (שקט) - רק כדי להפעיל את n8n
     const silenceBase64 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     
     const response = await axios.post(N8N_WEBHOOK_URL, {
@@ -147,8 +154,8 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       console.log(`🔊 Sending audio response to Twilio`);
       
       const audioPayload = response.data.audio;
-      
       const chunkSize = 160;
+      
       for (let i = 0; i < audioPayload.length; i += chunkSize) {
         const chunk = audioPayload.substr(i, chunkSize);
         
@@ -165,15 +172,5 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
     }
   } catch (error) {
     console.error('❌ Error processing audio:', error.message);
-    
-    ws.send(JSON.stringify({
-      event: 'media',
-      streamSid: streamSid,
-      media: {
-        payload: ''
-      }
-    }));
   }
 }
-
-console.log('🎯 Twilio-n8n WebSocket Bridge is ready!');
