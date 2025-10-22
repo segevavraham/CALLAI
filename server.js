@@ -63,7 +63,13 @@ wss.on('connection', (ws) => {
           callSid = msg.start.callSid;
           streamSid = msg.start.streamSid;
           console.log(`📞 Call started: ${callSid}`);
-          activeCalls.set(callSid, { ws, streamSid, audioBuffer: [], isProcessing: false });
+          activeCalls.set(callSid, { 
+            ws, 
+            streamSid, 
+            audioBuffer: [], 
+            isProcessing: false,
+            currentAudioPlaying: false  // ✅ Track AI speaking state
+          });
           
           // שלח הודעת פתיחה בעברית מיד!
           if (!welcomeSent) {
@@ -77,7 +83,8 @@ wss.on('connection', (ws) => {
 
         case 'media':
           // אם AI מדבר - ignore user audio (prevent interruption feedback loop)
-          if (currentAudioPlaying) {
+          const callData = activeCalls.get(callSid);
+          if (callData && callData.currentAudioPlaying) {
             break;
           }
 
@@ -90,12 +97,14 @@ wss.on('connection', (ws) => {
             if (audioBuffer.length >= MIN_AUDIO_CHUNKS && !isProcessing) {
               isProcessing = true;
               const chunksToProcess = [...audioBuffer];
-              audioBuffer = [];
+              audioBuffer = []; // ✅ Clear buffer for next turn
               
               console.log(`🎤 Processing ${chunksToProcess.length} audio chunks`);
               await processAudio(callSid, streamSid, chunksToProcess, ws);
               
+              // ✅ CRITICAL: Mark processing as done so we can listen again!
               isProcessing = false;
+              console.log('✅ Ready for next user input');
             } else if (audioBuffer.length < MIN_AUDIO_CHUNKS) {
               console.log(`⏭️  Skipping - only ${audioBuffer.length} chunks (need ${MIN_AUDIO_CHUNKS})`);
               audioBuffer = [];
@@ -259,9 +268,21 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       const totalTime = Date.now() - startTime;
       console.log(`🔊 Sending response (total: ${totalTime}ms)`);
       
+      // ✅ Mark that AI is speaking
+      const callData = activeCalls.get(callSid);
+      if (callData) {
+        callData.currentAudioPlaying = true;
+      }
+      
       await sendAudioToTwilio(ws, streamSid, audioPayload);
       
+      // ✅ Mark that AI finished speaking - ready for next user input!
+      if (callData) {
+        callData.currentAudioPlaying = false;
+      }
+      
       console.log(`✅ Complete response cycle: ${Date.now() - startTime}ms`);
+      console.log('👂 Listening for next user input...');
     } else {
       console.error('⚠️  Invalid response from n8n');
     }
@@ -270,6 +291,13 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
     if (error.response) {
       console.error('   Status:', error.response.status);
       console.error('   Data:', JSON.stringify(error.response.data, null, 2));
+    }
+    
+    // ✅ Make sure we can process again even if there was an error
+    const callData = activeCalls.get(callSid);
+    if (callData) {
+      callData.currentAudioPlaying = false;
+      callData.isProcessing = false;
     }
   }
 }
