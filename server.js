@@ -9,11 +9,11 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ⚙️ הגדרות - OPTIMIZED FOR REAL-TIME CONVERSATION
+// ⚙️ הגדרות - OPTIMIZED FOR QUALITY CONVERSATION
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://segevavraham.app.n8n.cloud/webhook/twilio-process-audio';
-const SILENCE_TIMEOUT = 600; // 600ms - ultra-fast response ⚡⚡
-const MIN_AUDIO_CHUNKS = 8; // Very low threshold - prioritize speed 🎤
-const CHUNK_SIZE = 160; // Twilio standard
+const SILENCE_TIMEOUT = 1000; // 1000ms - balanced for natural speech pauses ⚡
+const MIN_AUDIO_CHUNKS = 15; // Minimum chunks - ensures quality audio 🎤
+const CHUNK_SIZE = 160; // Twilio standard (20ms per chunk at 8kHz)
 const MAX_IDLE_TIME = 30000; // 30 seconds of silence before timeout warning
 const CONVERSATION_TIMEOUT = 300000; // 5 minutes total conversation limit
 const MAX_HISTORY_MESSAGES = 50; // Maximum messages to keep in history (prevent memory issues)
@@ -157,9 +157,9 @@ wss.on('connection', (ws) => {
             break;
           }
 
-          // Debug logging - only log every 50 chunks to avoid spam
-          if (callData.audioBuffer.length % 50 === 0 && callData.audioBuffer.length > 0) {
-            console.log(`📊 Audio buffer: ${callData.audioBuffer.length} chunks | Processing: ${callData.isProcessing} | Speaking: ${callData.currentAudioPlaying}`);
+          // Debug logging - log every 20 chunks to track progress
+          if (callData.audioBuffer.length % 20 === 0 && callData.audioBuffer.length > 0) {
+            console.log(`📊 Collecting audio: ${callData.audioBuffer.length} chunks (need ${MIN_AUDIO_CHUNKS}) | Processing: ${callData.isProcessing} | Speaking: ${callData.currentAudioPlaying}`);
           }
 
           if (callData.currentAudioPlaying) {
@@ -186,13 +186,15 @@ wss.on('connection', (ws) => {
               currentCallData.audioBuffer = []; // ✅ Clear buffer for next turn
 
               console.log(`\n🎤 Processing ${chunksToProcess.length} audio chunks (Turn ${currentCallData.turnCount + 1})`);
+              console.log(`   ⏱️  Audio duration: ~${Math.round(chunksToProcess.length * 20)}ms`);
               await processAudio(callSid, streamSid, chunksToProcess, ws);
               // Note: processAudio will reset isProcessing flag when done
             } else if (currentCallData.audioBuffer.length < MIN_AUDIO_CHUNKS) {
-              console.log(`⏭️  Skipping - only ${currentCallData.audioBuffer.length} chunks (need ${MIN_AUDIO_CHUNKS})`);
+              console.log(`⏭️  SKIPPED - only ${currentCallData.audioBuffer.length} chunks (need ${MIN_AUDIO_CHUNKS}) - user stopped speaking too quickly?`);
               currentCallData.audioBuffer = [];
             } else if (currentCallData.isProcessing) {
-              console.log(`⏸️  Already processing, buffering ${currentCallData.audioBuffer.length} chunks`);
+              console.log(`⏸️  Already processing, buffered ${currentCallData.audioBuffer.length} chunks will be ignored`);
+              currentCallData.audioBuffer = []; // Clear to avoid double processing
             }
           }, SILENCE_TIMEOUT);
           break;
