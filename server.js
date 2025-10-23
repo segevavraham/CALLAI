@@ -9,10 +9,10 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ⚙️ הגדרות - OPTIMIZED FOR QUALITY
+// ⚙️ הגדרות - OPTIMIZED FOR REAL-TIME CONVERSATION
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://segevavraham.app.n8n.cloud/webhook/twilio-process-audio';
-const SILENCE_TIMEOUT = 1200; // 1200ms - balanced for natural speech pauses 🎯
-const MIN_AUDIO_CHUNKS = 20; // Minimum chunks before processing - prevent noise
+const SILENCE_TIMEOUT = 800; // 800ms - fast response while avoiding word cuts ⚡
+const MIN_AUDIO_CHUNKS = 12; // Minimum chunks - works for short utterances too 🎤
 const CHUNK_SIZE = 160; // Twilio standard
 const MAX_IDLE_TIME = 30000; // 30 seconds of silence before timeout warning
 const CONVERSATION_TIMEOUT = 300000; // 5 minutes total conversation limit
@@ -94,14 +94,11 @@ const wss = new WebSocket.Server({ server, path: '/media-stream' });
 
 wss.on('connection', (ws) => {
   console.log('📞 New Twilio call connected');
-  
+
   let callSid = null;
   let streamSid = null;
-  let audioBuffer = [];
   let silenceTimeout = null;
   let welcomeSent = false;
-  let isProcessing = false; // Prevent multiple simultaneous processing
-  let currentAudioPlaying = false; // Track if AI is speaking
 
   ws.on('message', async (message) => {
     try {
@@ -141,30 +138,45 @@ wss.on('connection', (ws) => {
         case 'media':
           // אם AI מדבר - ignore user audio (prevent interruption feedback loop)
           const callData = activeCalls.get(callSid);
-          if (callData && callData.currentAudioPlaying) {
+          if (!callData) {
+            console.warn(`⚠️  No call data for ${callSid}`);
             break;
           }
 
-          audioBuffer.push(msg.media.payload);
-          
-          // ⚡ FASTER VAD - 600ms instead of 1500ms
+          if (callData.currentAudioPlaying) {
+            // AI is speaking, ignore user input to prevent feedback
+            // console.log(`🔇 Ignoring user input - AI speaking`);
+            break;
+          }
+
+          if (callData.isProcessing) {
+            // Already processing previous input, buffer this
+            // console.log(`⏸️  Buffering while processing`);
+          }
+
+          // ✅ Use callData.audioBuffer instead of local variable
+          callData.audioBuffer.push(msg.media.payload);
+
+          // ⚡ Real-time VAD
           clearTimeout(silenceTimeout);
           silenceTimeout = setTimeout(async () => {
+            const currentCallData = activeCalls.get(callSid);
+            if (!currentCallData) return;
+
             // Only process if we have enough audio AND not currently processing
-            if (audioBuffer.length >= MIN_AUDIO_CHUNKS && !isProcessing) {
-              isProcessing = true;
-              const chunksToProcess = [...audioBuffer];
-              audioBuffer = []; // ✅ Clear buffer for next turn
-              
+            if (currentCallData.audioBuffer.length >= MIN_AUDIO_CHUNKS && !currentCallData.isProcessing) {
+              currentCallData.isProcessing = true;
+              const chunksToProcess = [...currentCallData.audioBuffer];
+              currentCallData.audioBuffer = []; // ✅ Clear buffer for next turn
+
               console.log(`🎤 Processing ${chunksToProcess.length} audio chunks`);
               await processAudio(callSid, streamSid, chunksToProcess, ws);
-              
-              // ✅ CRITICAL: Mark processing as done so we can listen again!
-              isProcessing = false;
-              console.log('✅ Ready for next user input');
-            } else if (audioBuffer.length < MIN_AUDIO_CHUNKS) {
-              console.log(`⏭️  Skipping - only ${audioBuffer.length} chunks (need ${MIN_AUDIO_CHUNKS})`);
-              audioBuffer = [];
+              // Note: processAudio will reset isProcessing flag when done
+            } else if (currentCallData.audioBuffer.length < MIN_AUDIO_CHUNKS) {
+              console.log(`⏭️  Skipping - only ${currentCallData.audioBuffer.length} chunks (need ${MIN_AUDIO_CHUNKS})`);
+              currentCallData.audioBuffer = [];
+            } else if (currentCallData.isProcessing) {
+              console.log(`⏸️  Already processing, buffering ${currentCallData.audioBuffer.length} chunks`);
             }
           }, SILENCE_TIMEOUT);
           break;
@@ -469,7 +481,12 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       // ✅ Mark that AI is speaking
       callData.currentAudioPlaying = true;
 
-      await sendAudioToTwilio(ws, streamSid, audioPayload);
+      try {
+        await sendAudioToTwilio(ws, streamSid, audioPayload);
+      } catch (audioError) {
+        console.error('❌ Error sending audio to Twilio:', audioError.message);
+        // Continue anyway - we'll reset flags below
+      }
 
       // 📚 עדכן היסטוריית שיחה עם שני הצדדים
       if (response.data.userText) {
@@ -501,12 +518,18 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
 
       // ✅ Mark that AI finished speaking - ready for next user input!
       callData.currentAudioPlaying = false;
+      callData.isProcessing = false; // ✅ Critical: ready to process next input
 
       console.log(`✅ Complete response cycle: ${Date.now() - startTime}ms`);
       console.log(`   📚 History now: ${callData.conversationHistory.length} messages`);
       console.log('👂 Listening for next user input...');
     } else {
       console.error('⚠️  Invalid response from n8n');
+
+      // Reset flags so we can process next input
+      callData.currentAudioPlaying = false;
+      callData.isProcessing = false;
+
       await sendErrorMessage(callSid, streamSid, ws, 'n8n_error');
     }
   } catch (error) {
