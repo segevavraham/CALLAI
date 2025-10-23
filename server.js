@@ -11,12 +11,20 @@ const PORT = process.env.PORT || 3000;
 
 // ⚙️ הגדרות - OPTIMIZED FOR REAL-TIME CONVERSATION
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://segevavraham.app.n8n.cloud/webhook/twilio-process-audio';
-const SILENCE_TIMEOUT = 800; // 800ms - fast response while avoiding word cuts ⚡
-const MIN_AUDIO_CHUNKS = 12; // Minimum chunks - works for short utterances too 🎤
+const SILENCE_TIMEOUT = 600; // 600ms - ultra-fast response ⚡⚡
+const MIN_AUDIO_CHUNKS = 8; // Very low threshold - prioritize speed 🎤
 const CHUNK_SIZE = 160; // Twilio standard
 const MAX_IDLE_TIME = 30000; // 30 seconds of silence before timeout warning
 const CONVERSATION_TIMEOUT = 300000; // 5 minutes total conversation limit
 const MAX_HISTORY_MESSAGES = 50; // Maximum messages to keep in history (prevent memory issues)
+
+// 📊 Performance tracking
+let performanceStats = {
+  totalCalls: 0,
+  averageProcessingTime: 0,
+  averageN8nTime: 0,
+  averageConversionTime: 0
+};
 
 // אחסון זמני של חיבורי WebSocket פעילים
 const activeCalls = new Map();
@@ -41,6 +49,12 @@ app.get('/health', (req, res) => {
 app.get('/stats', (req, res) => {
   const stats = {
     activeCalls: activeCalls.size,
+    performance: {
+      totalProcessedCalls: performanceStats.totalCalls,
+      averageN8nTime: Math.round(performanceStats.averageN8nTime),
+      averageProcessingTime: Math.round(performanceStats.averageProcessingTime),
+      averageConversionTime: Math.round(performanceStats.averageConversionTime)
+    },
     calls: []
   };
 
@@ -421,7 +435,17 @@ async function sendWelcomeMessage(callSid, streamSid, ws) {
 }
 
 async function processAudio(callSid, streamSid, audioChunks, ws) {
-  const startTime = Date.now();
+  const timings = {
+    start: Date.now(),
+    preparePayload: 0,
+    n8nRequest: 0,
+    n8nResponse: 0,
+    conversion: 0,
+    sendToTwilio: 0,
+    updateHistory: 0,
+    total: 0
+  };
+
   const callData = activeCalls.get(callSid);
 
   if (!callData) {
@@ -437,7 +461,7 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
 
     // 📊 לוג מפורט של מצב השיחה
     const callDuration = Date.now() - callData.startTime;
-    console.log(`🎤 Processing audio for ${callSid}`);
+    console.log(`\n🎤 Processing audio for ${callSid}`);
     console.log(`   📦 Chunks: ${audioChunks.length}`);
     console.log(`   🔢 Turn: ${callData.turnCount + 1}`);
     console.log(`   ⏱️  Duration: ${Math.round(callDuration / 1000)}s`);
@@ -456,13 +480,17 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       }
     };
 
+    timings.preparePayload = Date.now() - timings.start;
+
+    // ⏱️ Track n8n request time
+    const n8nStartTime = Date.now();
     const response = await axios.post(N8N_WEBHOOK_URL, payload, {
       timeout: 30000,
       headers: { 'Content-Type': 'application/json' }
     });
 
-    const n8nTime = Date.now() - startTime;
-    console.log(`📥 n8n responded in ${n8nTime}ms`);
+    timings.n8nResponse = Date.now() - n8nStartTime;
+    console.log(`📥 n8n responded in ${timings.n8nResponse}ms`);
 
     if (response.data.success && response.data.audio) {
       let audioPayload = response.data.audio;
@@ -472,21 +500,24 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
         const convertStart = Date.now();
         console.log('🔄 Converting response MP3 to mulaw...');
         audioPayload = await convertMp3ToMulaw(audioPayload);
-        console.log(`✅ Converted in ${Date.now() - convertStart}ms`);
+        timings.conversion = Date.now() - convertStart;
+        console.log(`✅ Converted in ${timings.conversion}ms`);
       }
-
-      const totalTime = Date.now() - startTime;
-      console.log(`🔊 Sending response (total: ${totalTime}ms)`);
 
       // ✅ Mark that AI is speaking
       callData.currentAudioPlaying = true;
 
+      const sendStart = Date.now();
       try {
         await sendAudioToTwilio(ws, streamSid, audioPayload);
+        timings.sendToTwilio = Date.now() - sendStart;
       } catch (audioError) {
         console.error('❌ Error sending audio to Twilio:', audioError.message);
+        timings.sendToTwilio = Date.now() - sendStart;
         // Continue anyway - we'll reset flags below
       }
+
+      const historyStart = Date.now();
 
       // 📚 עדכן היסטוריית שיחה עם שני הצדדים
       if (response.data.userText) {
@@ -503,7 +534,7 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
           role: 'assistant',
           content: response.data.text,
           timestamp: Date.now(),
-          processingTime: totalTime
+          processingTime: timings.n8nResponse
         });
       }
 
@@ -513,6 +544,8 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       // 🔢 עדכן מונה תורות
       callData.turnCount++;
 
+      timings.updateHistory = Date.now() - historyStart;
+
       // ⏱️  איפוס timeout - יש פעילות
       setupIdleTimeout(callSid);
 
@@ -520,8 +553,27 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       callData.currentAudioPlaying = false;
       callData.isProcessing = false; // ✅ Critical: ready to process next input
 
-      console.log(`✅ Complete response cycle: ${Date.now() - startTime}ms`);
-      console.log(`   📚 History now: ${callData.conversationHistory.length} messages`);
+      timings.total = Date.now() - timings.start;
+
+      // 📊 Detailed timing breakdown
+      console.log(`\n⏱️  TIMING BREAKDOWN:`);
+      console.log(`   📦 Prepare payload: ${timings.preparePayload}ms`);
+      console.log(`   🌐 n8n processing: ${timings.n8nResponse}ms ⚠️${timings.n8nResponse > 3000 ? ' SLOW!' : ''}`);
+      console.log(`   🔄 Audio conversion: ${timings.conversion}ms`);
+      console.log(`   📤 Send to Twilio: ${timings.sendToTwilio}ms`);
+      console.log(`   📚 Update history: ${timings.updateHistory}ms`);
+      console.log(`   ✅ TOTAL: ${timings.total}ms\n`);
+
+      // Update performance stats
+      performanceStats.totalCalls++;
+      performanceStats.averageN8nTime =
+        (performanceStats.averageN8nTime * (performanceStats.totalCalls - 1) + timings.n8nResponse) / performanceStats.totalCalls;
+      performanceStats.averageProcessingTime =
+        (performanceStats.averageProcessingTime * (performanceStats.totalCalls - 1) + timings.total) / performanceStats.totalCalls;
+      performanceStats.averageConversionTime =
+        (performanceStats.averageConversionTime * (performanceStats.totalCalls - 1) + timings.conversion) / performanceStats.totalCalls;
+
+      console.log(`📚 History now: ${callData.conversationHistory.length} messages`);
       console.log('👂 Listening for next user input...');
     } else {
       console.error('⚠️  Invalid response from n8n');
