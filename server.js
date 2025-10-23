@@ -111,7 +111,6 @@ wss.on('connection', (ws) => {
 
   let callSid = null;
   let streamSid = null;
-  let silenceTimeout = null;
   let welcomeSent = false;
 
   ws.on('message', async (message) => {
@@ -133,7 +132,8 @@ wss.on('connection', (ws) => {
             startTime: Date.now(),       // ⏱️  Track call duration
             lastActivityTime: Date.now(), // 👂 Track user activity
             turnCount: 0,                // 🔢 Track conversation turns
-            idleWarningsSent: 0          // ⚠️  Track timeout warnings
+            idleWarningsSent: 0,         // ⚠️  Track timeout warnings
+            silenceTimeout: null         // 🎤 VAD timeout reference
           });
           
           // ⏱️  הפעל ניהול timeout
@@ -157,23 +157,25 @@ wss.on('connection', (ws) => {
             break;
           }
 
+          // Debug logging - only log every 50 chunks to avoid spam
+          if (callData.audioBuffer.length % 50 === 0 && callData.audioBuffer.length > 0) {
+            console.log(`📊 Audio buffer: ${callData.audioBuffer.length} chunks | Processing: ${callData.isProcessing} | Speaking: ${callData.currentAudioPlaying}`);
+          }
+
           if (callData.currentAudioPlaying) {
             // AI is speaking, ignore user input to prevent feedback
-            // console.log(`🔇 Ignoring user input - AI speaking`);
             break;
           }
 
-          if (callData.isProcessing) {
-            // Already processing previous input, buffer this
-            // console.log(`⏸️  Buffering while processing`);
-          }
-
-          // ✅ Use callData.audioBuffer instead of local variable
+          // ✅ Use callData.audioBuffer
           callData.audioBuffer.push(msg.media.payload);
 
-          // ⚡ Real-time VAD
-          clearTimeout(silenceTimeout);
-          silenceTimeout = setTimeout(async () => {
+          // ⚡ Real-time VAD - use callData.silenceTimeout
+          if (callData.silenceTimeout) {
+            clearTimeout(callData.silenceTimeout);
+          }
+
+          callData.silenceTimeout = setTimeout(async () => {
             const currentCallData = activeCalls.get(callSid);
             if (!currentCallData) return;
 
@@ -183,7 +185,7 @@ wss.on('connection', (ws) => {
               const chunksToProcess = [...currentCallData.audioBuffer];
               currentCallData.audioBuffer = []; // ✅ Clear buffer for next turn
 
-              console.log(`🎤 Processing ${chunksToProcess.length} audio chunks`);
+              console.log(`\n🎤 Processing ${chunksToProcess.length} audio chunks (Turn ${currentCallData.turnCount + 1})`);
               await processAudio(callSid, streamSid, chunksToProcess, ws);
               // Note: processAudio will reset isProcessing flag when done
             } else if (currentCallData.audioBuffer.length < MIN_AUDIO_CHUNKS) {
@@ -201,6 +203,7 @@ wss.on('connection', (ws) => {
           if (endCallData) {
             // נקה את כל ה-timeouts
             if (endCallData.idleTimeout) clearTimeout(endCallData.idleTimeout);
+            if (endCallData.silenceTimeout) clearTimeout(endCallData.silenceTimeout);
 
             // 📊 לוג סטטיסטיקות שיחה
             const callDuration = Date.now() - endCallData.startTime;
@@ -210,7 +213,6 @@ wss.on('connection', (ws) => {
             console.log(`   📚 Messages: ${endCallData.conversationHistory.length}`);
           }
           activeCalls.delete(callSid);
-          clearTimeout(silenceTimeout);
           break;
       }
     } catch (error) {
@@ -222,12 +224,12 @@ wss.on('connection', (ws) => {
     console.log('📞 WebSocket connection closed');
     if (callSid) {
       const closeCallData = activeCalls.get(callSid);
-      if (closeCallData && closeCallData.idleTimeout) {
-        clearTimeout(closeCallData.idleTimeout);
+      if (closeCallData) {
+        if (closeCallData.idleTimeout) clearTimeout(closeCallData.idleTimeout);
+        if (closeCallData.silenceTimeout) clearTimeout(closeCallData.silenceTimeout);
       }
       activeCalls.delete(callSid);
     }
-    clearTimeout(silenceTimeout);
   });
 });
 
@@ -466,6 +468,7 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
     console.log(`   🔢 Turn: ${callData.turnCount + 1}`);
     console.log(`   ⏱️  Duration: ${Math.round(callDuration / 1000)}s`);
     console.log(`   📚 History: ${callData.conversationHistory.length} messages`);
+    console.log(`   🔧 Initial state: isProcessing=${callData.isProcessing}, speaking=${callData.currentAudioPlaying}`);
 
     // 🔄 הכן payload עם היסטוריה מלאה
     const payload = {
@@ -504,16 +507,21 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
         console.log(`✅ Converted in ${timings.conversion}ms`);
       }
 
-      // ✅ Mark that AI is speaking
-      callData.currentAudioPlaying = true;
-
       const sendStart = Date.now();
       try {
+        // ✅ Mark that AI is speaking JUST before sending
+        callData.currentAudioPlaying = true;
+
         await sendAudioToTwilio(ws, streamSid, audioPayload);
         timings.sendToTwilio = Date.now() - sendStart;
+
+        // ✅ IMMEDIATELY mark that AI stopped speaking
+        callData.currentAudioPlaying = false;
+        console.log(`🔊 Audio sent successfully in ${timings.sendToTwilio}ms`);
       } catch (audioError) {
         console.error('❌ Error sending audio to Twilio:', audioError.message);
         timings.sendToTwilio = Date.now() - sendStart;
+        callData.currentAudioPlaying = false;
         // Continue anyway - we'll reset flags below
       }
 
@@ -549,9 +557,9 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
       // ⏱️  איפוס timeout - יש פעילות
       setupIdleTimeout(callSid);
 
-      // ✅ Mark that AI finished speaking - ready for next user input!
-      callData.currentAudioPlaying = false;
+      // ✅ Mark that processing is done - ready for next user input!
       callData.isProcessing = false; // ✅ Critical: ready to process next input
+      // Note: currentAudioPlaying already reset in sendAudioToTwilio block above
 
       timings.total = Date.now() - timings.start;
 
@@ -574,13 +582,14 @@ async function processAudio(callSid, streamSid, audioChunks, ws) {
         (performanceStats.averageConversionTime * (performanceStats.totalCalls - 1) + timings.conversion) / performanceStats.totalCalls;
 
       console.log(`📚 History now: ${callData.conversationHistory.length} messages`);
-      console.log('👂 Listening for next user input...');
+      console.log(`🔧 State: isProcessing=${callData.isProcessing}, currentAudioPlaying=${callData.currentAudioPlaying}, bufferSize=${callData.audioBuffer.length}`);
+      console.log('👂 Listening for next user input...\n');
     } else {
       console.error('⚠️  Invalid response from n8n');
 
       // Reset flags so we can process next input
-      callData.currentAudioPlaying = false;
       callData.isProcessing = false;
+      callData.currentAudioPlaying = false; // Just in case
 
       await sendErrorMessage(callSid, streamSid, ws, 'n8n_error');
     }
