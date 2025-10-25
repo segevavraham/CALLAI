@@ -22,8 +22,8 @@ class ElevenLabsClient extends EventEmitter {
       console.log(`🎤 Connecting to ElevenLabs v3 (voice: ${this.voiceId})...`);
 
       // ElevenLabs WebSocket URL for text-to-speech streaming
-      // Note: eleven_v3_alpha supports WebSocket + Hebrew!
-      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_v3_alpha`;
+      // Note: Using eleven_turbo_v2_5 for WebSocket (eleven_v3 doesn't support WebSocket)
+      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_turbo_v2_5`;
 
       this.ws = new WebSocket(wsUrl, {
         headers: {
@@ -176,7 +176,7 @@ class ElevenLabsHTTP {
 
     const payload = {
       text: text,
-      model_id: 'eleven_v3_alpha', // v3 alpha with Hebrew support + WebSocket
+      model_id: 'eleven_v3', // v3 with Hebrew support (HTTP only)
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.8,
