@@ -226,7 +226,20 @@ class ConversationPipeline {
       console.log(`🔍 DEBUG: About to convert ${chunks.length} chunks to WAV`);
       console.log(`   First 3 chunk types: ${chunks.slice(0, 3).map(c => typeof c).join(', ')}`);
       console.log(`   First 3 chunk lengths: ${chunks.slice(0, 3).map(c => c ? c.length : 0).join(', ')}`);
-      if (chunks.length > 0 && chunks[0]) {
+
+      // Check if chunks are diverse (real speech) or repetitive (noise/silence)
+      if (chunks.length >= 3) {
+        const chunk1 = chunks[0].substring(0, 30);
+        const chunk2 = chunks[Math.floor(chunks.length / 2)].substring(0, 30);
+        const chunk3 = chunks[chunks.length - 1].substring(0, 30);
+        const isDiverse = chunk1 !== chunk2 || chunk2 !== chunk3;
+
+        console.log(`   🔍 Audio diversity check:`);
+        console.log(`      First chunk: "${chunk1}..."`);
+        console.log(`      Middle chunk: "${chunk2}..."`);
+        console.log(`      Last chunk: "${chunk3}..."`);
+        console.log(`      Are chunks different? ${isDiverse ? '✅ YES (likely speech)' : '⚠️  NO (likely silence/noise)'}`);
+      } else if (chunks.length > 0 && chunks[0]) {
         console.log(`   First chunk preview (first 50 chars): "${chunks[0].substring(0, 50)}..."`);
       }
 
@@ -234,8 +247,21 @@ class ConversationPipeline {
       const userText = await this.whisper.transcribe(wavBuffer, 'he');
       timings.whisper = Date.now() - whisperStart;
 
+      // ALWAYS log what Whisper returned (even if empty)
+      console.log(`\n${'='.repeat(70)}`);
+      console.log(`🎤 WHISPER RESULT:`);
+      console.log(`   Raw text: "${userText}"`);
+      console.log(`   Length: ${userText ? userText.length : 0} characters`);
+      console.log(`   Is empty: ${!userText || userText.trim().length === 0}`);
+      console.log(`   Transcription time: ${timings.whisper}ms`);
+      console.log(`${'='.repeat(70)}\n`);
+
       if (!userText || userText.trim().length === 0) {
-        console.log('⏭️  No speech detected, skipping');
+        console.log('⚠️  No speech detected - Whisper returned empty/silence');
+        console.log('   This usually means:');
+        console.log('   1. Background noise/silence was recorded');
+        console.log('   2. Audio quality too low');
+        console.log('   3. Microphone not working properly\n');
         this.isProcessing = false;
         return;
       }
@@ -245,7 +271,7 @@ class ConversationPipeline {
       // Log user input prominently
       console.log(`\n${'='.repeat(70)}`);
       console.log(`👤 USER SAID: "${userText}"`);
-      console.log(`🎤 Transcription time: ${timings.whisper}ms | Turn: ${this.stats.turns + 1}`);
+      console.log(`🎤 Turn: ${this.stats.turns + 1}`);
       console.log(`${'='.repeat(70)}\n`);
 
       // Log to n8n
