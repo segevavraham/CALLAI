@@ -10,6 +10,7 @@ const PORT = process.env.PORT || 3000;
 
 // ⚙️ Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL; // Optional
 
 if (!OPENAI_API_KEY) {
   console.error('❌ FATAL: OPENAI_API_KEY environment variable is required!');
@@ -94,7 +95,7 @@ wss.on('connection', (ws) => {
 
           try {
             // Create and initialize Audio Bridge
-            bridge = new AudioBridge(ws, callSid, streamSid);
+            bridge = new AudioBridge(ws, callSid, streamSid, N8N_WEBHOOK_URL);
             await bridge.initialize(OPENAI_API_KEY);
 
             // Store bridge

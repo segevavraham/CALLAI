@@ -42,12 +42,20 @@ Edit `.env` file:
 ```bash
 OPENAI_API_KEY=sk-your-actual-openai-api-key-here
 PORT=3000
+
+# Optional: n8n Analytics Integration
+N8N_WEBHOOK_URL=https://your-n8n-instance.app.n8n.cloud/webhook/twilio-analytics
 ```
 
 **Get your OpenAI API Key:**
 1. Go to https://platform.openai.com/api-keys
 2. Create a new API key
 3. Make sure you have access to `gpt-4o-realtime-preview-2024-10-01` model
+
+**n8n Integration (Optional):**
+- If `N8N_WEBHOOK_URL` is set, all conversation data will be sent to n8n asynchronously
+- This does NOT affect call performance - it's fire-and-forget logging
+- See [N8N_INTEGRATION.md](./N8N_INTEGRATION.md) for full details
 
 ### 3. Run the Server
 
@@ -83,9 +91,11 @@ You should see:
 ├── server.js                   # Main server (Twilio WebSocket handler)
 ├── openai-realtime.js         # OpenAI Realtime API connection module
 ├── audio-bridge.js            # Audio bridge (Twilio ↔ OpenAI)
+├── n8n-logger.js              # n8n analytics integration (optional)
 ├── package.json               # Dependencies
 ├── .env                       # Environment variables (do NOT commit!)
-└── OPENAI_REALTIME_SETUP.md   # This file
+├── OPENAI_REALTIME_SETUP.md   # This file
+└── N8N_INTEGRATION.md         # n8n integration guide
 ```
 
 ## 🔧 How It Works

@@ -2,13 +2,17 @@
 // Handles bidirectional audio streaming and event coordination
 
 const OpenAIRealtimeConnection = require('./openai-realtime');
+const N8nLogger = require('./n8n-logger');
 
 class AudioBridge {
-  constructor(twilioWs, callSid, streamSid) {
+  constructor(twilioWs, callSid, streamSid, n8nWebhookUrl = null) {
     this.twilioWs = twilioWs;
     this.callSid = callSid;
     this.streamSid = streamSid;
     this.openai = null;
+
+    // n8n Analytics Logger (optional)
+    this.n8nLogger = new N8nLogger(n8nWebhookUrl);
 
     // State tracking
     this.isAISpeaking = false;
@@ -19,6 +23,8 @@ class AudioBridge {
     this.conversationHistory = [];
     this.turnCount = 0;
     this.startTime = Date.now();
+    this.currentUserText = null;
+    this.currentAIText = null;
 
     // Statistics
     this.stats = {
@@ -46,6 +52,10 @@ class AudioBridge {
       await this.openai.connect();
 
       console.log(`✅ Audio Bridge ready for call ${this.callSid}`);
+
+      // Log call started to n8n
+      this.n8nLogger.logCallStarted(this.callSid, this.streamSid);
+
       return true;
     } catch (error) {
       console.error(`❌ Failed to initialize Audio Bridge:`, error.message);
@@ -60,12 +70,16 @@ class AudioBridge {
     // User transcript received
     this.openai.on('transcript', (data) => {
       this.stats.transcriptionsReceived++;
+      this.currentUserText = data.text; // Store for turn completion
       this.conversationHistory.push({
         role: 'user',
         content: data.text,
         timestamp: data.timestamp
       });
       console.log(`📝 User said: "${data.text}"`);
+
+      // Log to n8n
+      this.n8nLogger.logUserTranscript(this.callSid, data.text, this.turnCount + 1);
     });
 
     // AI response audio streaming
@@ -75,12 +89,16 @@ class AudioBridge {
 
     // AI response text completed
     this.openai.on('response.text.done', (text) => {
+      this.currentAIText = text; // Store for turn completion
       this.conversationHistory.push({
         role: 'assistant',
         content: text,
         timestamp: Date.now()
       });
       console.log(`🤖 AI said: "${text}"`);
+
+      // Log to n8n
+      this.n8nLogger.logAITranscript(this.callSid, text, this.turnCount + 1);
     });
 
     // AI started speaking
@@ -120,12 +138,29 @@ class AudioBridge {
     // Response completed
     this.openai.on('response.done', () => {
       console.log(`✅ Turn ${this.turnCount} completed`);
+
+      // Log turn completed to n8n
+      if (this.currentUserText && this.currentAIText) {
+        this.n8nLogger.logTurnCompleted(
+          this.callSid,
+          this.turnCount,
+          this.currentUserText,
+          this.currentAIText
+        );
+
+        // Reset for next turn
+        this.currentUserText = null;
+        this.currentAIText = null;
+      }
     });
 
     // Errors
     this.openai.on('error', (error) => {
       console.error('❌ OpenAI error:', error);
       this.sendErrorToTwilio('Sorry, I encountered an error. Please try again.');
+
+      // Log error to n8n
+      this.n8nLogger.logError(this.callSid, error, 'OpenAI connection');
     });
 
     // Connection closed
@@ -231,6 +266,12 @@ class AudioBridge {
     console.log(`   📥 Audio chunks received: ${stats.audioChunksReceived}`);
     console.log(`   📝 Transcriptions: ${stats.transcriptionsReceived}`);
     console.log(`   🤖 Responses: ${stats.responsesGenerated}`);
+
+    // Send full conversation to n8n
+    this.n8nLogger.logConversation(this.callSid, this.conversationHistory, stats);
+
+    // Log call ended to n8n
+    this.n8nLogger.logCallEnded(this.callSid, stats);
 
     // Close OpenAI connection
     if (this.openai) {
