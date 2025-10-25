@@ -90,17 +90,23 @@ class WhisperClient {
 
     // Combine all chunks
     const mulawBase64 = base64Chunks.join('');
-    console.log(`   🔗 Combined base64: ${mulawBase64.length} characters`);
+    console.log(`   🔗 Combined base64: ${mulawBase64.length} characters (before cleaning)`);
+
+    // CRITICAL FIX: Remove all non-base64 characters
+    // This handles whitespace, newlines, or other invalid chars that Twilio might include
+    const cleanedBase64 = mulawBase64.replace(/[^A-Za-z0-9+/=]/g, '');
+    console.log(`   🧹 Cleaned base64: ${cleanedBase64.length} characters (after cleaning)`);
 
     // Check combined string validity
     const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-    const isValid = base64Regex.test(mulawBase64);
-    console.log(`   ✓ Combined base64 is valid: ${isValid}`);
+    const isValidBefore = base64Regex.test(mulawBase64);
+    const isValidAfter = base64Regex.test(cleanedBase64);
+    console.log(`   ✓ Base64 validity: before=${isValidBefore}, after=${isValidAfter}`);
 
     // Try to decode
     let mulawBuffer;
     try {
-      mulawBuffer = Buffer.from(mulawBase64, 'base64');
+      mulawBuffer = Buffer.from(cleanedBase64, 'base64');
       console.log(`   ✅ Decoded successfully: ${mulawBuffer.length} bytes`);
     } catch (error) {
       console.error(`   ❌ Decode error:`, error.message);
@@ -109,7 +115,7 @@ class WhisperClient {
 
     console.log(`   📊 Raw μ-law data: ${mulawBuffer.length} bytes`);
     console.log(`   ⏱️  Duration: ~${(mulawBuffer.length / 8000).toFixed(2)}s at 8kHz`);
-    console.log(`   📐 Expected bytes from base64: ~${Math.floor(mulawBase64.length * 3 / 4)}`);
+    console.log(`   📐 Expected bytes from base64: ~${Math.floor(cleanedBase64.length * 3 / 4)}`);
 
     // Validate minimum duration
     if (mulawBuffer.length < 800) { // 0.1s at 8kHz
