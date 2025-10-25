@@ -231,7 +231,12 @@ class ConversationPipeline {
       }
 
       this.stats.transcriptions++;
-      console.log(`📝 User: "${userText}" (${timings.whisper}ms)`);
+
+      // Log user input prominently
+      console.log(`\n${'='.repeat(70)}`);
+      console.log(`👤 USER SAID: "${userText}"`);
+      console.log(`🎤 Transcription time: ${timings.whisper}ms | Turn: ${this.stats.turns + 1}`);
+      console.log(`${'='.repeat(70)}\n`);
 
       // Log to n8n
       this.n8nLogger.logUserTranscript(this.callSid, userText, this.stats.turns + 1);
@@ -304,7 +309,12 @@ class ConversationPipeline {
       }
 
       this.stats.responses++;
-      console.log(`🤖 AI: "${aiText}" (${timings.gpt4Total}ms total)`);
+
+      // Log AI response prominently
+      console.log(`\n${'─'.repeat(70)}`);
+      console.log(`🤖 AI RESPONSE: "${aiText}"`);
+      console.log(`⏱️  Generation time: ${timings.gpt4Total}ms | First token: ${timings.gpt4FirstToken}ms`);
+      console.log(`${'─'.repeat(70)}\n`);
 
       // Log to n8n
       this.n8nLogger.logAITranscript(this.callSid, aiText, this.stats.turns + 1);
