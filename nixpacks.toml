@@ -1,11 +1,5 @@
+# Nixpacks configuration for Railway/Render deployment
+# Ensures ffmpeg is installed in the deployment environment
+
 [phases.setup]
-nixPkgs = ["nodejs-18_x", "ffmpeg"]
-
-[phases.install]
-cmds = ["npm install"]
-
-[phases.build]
-cmds = []
-
-[start]
-cmd = "node server.js"
+nixPkgs = ["ffmpeg"]
