@@ -22,7 +22,8 @@ class ElevenLabsClient extends EventEmitter {
       console.log(`🎤 Connecting to ElevenLabs v3 (voice: ${this.voiceId})...`);
 
       // ElevenLabs WebSocket URL for text-to-speech streaming
-      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_v3`;
+      // Note: Using eleven_turbo_v2_5 for WebSocket (eleven_v3 doesn't support WebSocket)
+      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_turbo_v2_5`;
 
       this.ws = new WebSocket(wsUrl, {
         headers: {
@@ -34,7 +35,7 @@ class ElevenLabsClient extends EventEmitter {
         console.log('✅ Connected to ElevenLabs v3');
         this.isConnected = true;
 
-        // Send initial configuration with Alpha model settings
+        // Send initial configuration with Alpha model settings + Hebrew language
         const config = {
           text: ' ',
           voice_settings: {
@@ -46,6 +47,7 @@ class ElevenLabsClient extends EventEmitter {
           generation_config: {
             chunk_length_schedule: [120, 160, 250, 290] // Optimized for streaming
           },
+          language_code: 'he',  // Hebrew language enforcement (ISO 639-1)
           xi_api_key: this.apiKey
         };
 
@@ -174,7 +176,7 @@ class ElevenLabsHTTP {
 
     const payload = {
       text: text,
-      model_id: 'eleven_v3', // v3 with Hebrew support
+      model_id: 'eleven_v3', // v3 with Hebrew support (HTTP only)
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.8,
