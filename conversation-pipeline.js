@@ -35,6 +35,7 @@ class ConversationPipeline {
     // Configuration
     this.SILENCE_TIMEOUT = 800; // ms - how long to wait after user stops speaking
     this.MIN_AUDIO_CHUNKS = 10; // minimum chunks before processing
+    this.MAX_BUFFER_SIZE = 400; // force processing after this many chunks (fallback)
 
     // Statistics
     this.stats = {
@@ -65,6 +66,36 @@ class ConversationPipeline {
   }
 
   /**
+   * Check if audio chunk contains speech (amplitude detection)
+   */
+  hasSignificantAudio(base64Audio) {
+    try {
+      const audioBuffer = Buffer.from(base64Audio, 'base64');
+
+      // Calculate RMS (Root Mean Square) amplitude
+      let sum = 0;
+      for (let i = 0; i < audioBuffer.length; i++) {
+        const sample = audioBuffer[i];
+        sum += sample * sample;
+      }
+      const rms = Math.sqrt(sum / audioBuffer.length);
+
+      // Threshold for speech detection (adjust if needed)
+      const SPEECH_THRESHOLD = 15; // μ-law typically has higher values for speech
+
+      // Log RMS value occasionally for debugging
+      if (this.audioBuffer.length % 100 === 0) {
+        console.log(`🔊 Audio RMS: ${rms.toFixed(2)} (threshold: ${SPEECH_THRESHOLD})`);
+      }
+
+      return rms > SPEECH_THRESHOLD;
+    } catch (error) {
+      // If can't decode, assume it has audio
+      return true;
+    }
+  }
+
+  /**
    * Handle incoming audio from Twilio
    */
   async handleAudio(audioPayload) {
@@ -76,19 +107,44 @@ class ConversationPipeline {
     // Buffer audio
     this.audioBuffer.push(audioPayload);
 
-    // Reset silence timeout (user is still speaking)
-    if (this.silenceTimeout) {
-      clearTimeout(this.silenceTimeout);
+    // Force processing if buffer too large (fallback safety)
+    if (this.audioBuffer.length >= this.MAX_BUFFER_SIZE) {
+      console.log(`⚠️  Buffer reached ${this.MAX_BUFFER_SIZE} chunks - forcing processing`);
+      if (this.silenceTimeout) {
+        clearTimeout(this.silenceTimeout);
+      }
+      await this.processBufferedAudio();
+      return;
     }
 
-    // Set new timeout - process audio after silence
-    this.silenceTimeout = setTimeout(async () => {
-      await this.processBufferedAudio();
-    }, this.SILENCE_TIMEOUT);
+    // Check if this chunk has significant audio (speech detection)
+    const hasSpeech = this.hasSignificantAudio(audioPayload);
+
+    if (hasSpeech) {
+      // Reset silence timeout (user is still speaking)
+      if (this.silenceTimeout) {
+        clearTimeout(this.silenceTimeout);
+      }
+
+      // Only start timeout if we have minimum chunks
+      if (this.audioBuffer.length >= this.MIN_AUDIO_CHUNKS) {
+        // Set new timeout - process audio after silence
+        this.silenceTimeout = setTimeout(async () => {
+          console.log(`⏱️  Silence detected after speech - processing ${this.audioBuffer.length} chunks`);
+          await this.processBufferedAudio();
+        }, this.SILENCE_TIMEOUT);
+      }
+
+      // Log when first speech detected
+      if (this.audioBuffer.length === 1) {
+        console.log(`🎤 Speech detected - collecting audio (need ${this.MIN_AUDIO_CHUNKS} chunks)...`);
+      }
+    }
+    // If no speech detected, don't reset timeout - let silence timer expire
 
     // Log buffer status every 50 chunks
     if (this.audioBuffer.length % 50 === 0 && this.audioBuffer.length > 0) {
-      console.log(`📊 Audio buffer: ${this.audioBuffer.length} chunks`);
+      console.log(`📊 Audio buffer: ${this.audioBuffer.length} chunks (speech: ${hasSpeech ? 'yes' : 'no'})`);
     }
   }
 
