@@ -1,15 +1,17 @@
-// Twilio Media Streams <-> OpenAI Realtime API Bridge
+// Twilio Media Streams <-> Whisper + GPT-4 + ElevenLabs v3 Pipeline
 require('dotenv').config();
 
 const express = require('express');
 const WebSocket = require('ws');
-const AudioBridge = require('./audio-bridge');
+const ConversationPipeline = require('./conversation-pipeline');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ⚙️ Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'exsUS4vynmxd379XN4yO'; // Hebrew voice
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL; // Optional
 
 if (!OPENAI_API_KEY) {
@@ -18,8 +20,14 @@ if (!OPENAI_API_KEY) {
   process.exit(1);
 }
 
-// Store active call bridges
-const activeCalls = new Map(); // Map<callSid, AudioBridge>
+if (!ELEVENLABS_API_KEY) {
+  console.error('❌ FATAL: ELEVENLABS_API_KEY environment variable is required!');
+  console.error('   Set it in your .env file or environment variables');
+  process.exit(1);
+}
+
+// Store active pipelines
+const activeCalls = new Map(); // Map<callSid, ConversationPipeline>
 
 // 🏥 Health check endpoint
 app.get('/health', (req, res) => {
@@ -28,7 +36,8 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     activeCalls: activeCalls.size,
     timestamp: new Date().toISOString(),
-    mode: 'OpenAI Realtime API'
+    mode: 'Whisper + GPT-4 + ElevenLabs v3',
+    voiceId: ELEVENLABS_VOICE_ID
   });
 });
 
@@ -36,9 +45,9 @@ app.get('/health', (req, res) => {
 app.get('/stats', (req, res) => {
   const calls = [];
 
-  activeCalls.forEach((bridge, callSid) => {
-    const bridgeStats = bridge.getStats();
-    calls.push(bridgeStats);
+  activeCalls.forEach((pipeline, callSid) => {
+    const stats = pipeline.getStats();
+    calls.push(stats);
   });
 
   res.json({
@@ -65,12 +74,16 @@ app.get('/voice', (req, res) => {
 // הפעל HTTP server
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Twilio ⟷ OpenAI Realtime API Bridge`);
-  console.log(`\n✅ Features:`);
-  console.log(`   🎤 Real-time voice conversation`);
-  console.log(`   🇮🇱 Hebrew language support`);
-  console.log(`   🔄 Bidirectional audio streaming`);
-  console.log(`   📊 Live transcription and analytics\n`);
+  console.log(`🎯 Twilio ⟷ Whisper + GPT-4 + ElevenLabs v3 Pipeline`);
+  console.log(`\n✅ Pipeline Components:`);
+  console.log(`   🎤 Whisper API - Speech-to-Text (Hebrew)`);
+  console.log(`   🤖 GPT-4 - Conversation AI`);
+  console.log(`   🎵 ElevenLabs v3 - Natural Hebrew TTS`);
+  console.log(`   📊 n8n Analytics - ${N8N_WEBHOOK_URL ? 'Enabled' : 'Disabled'}`);
+  console.log(`\n🎙️  Voice Settings:`);
+  console.log(`   Voice ID: ${ELEVENLABS_VOICE_ID}`);
+  console.log(`   Model: eleven_turbo_v2_5 (v3 with Hebrew)`);
+  console.log(`   Style: Alpha (most human-like)\n`);
 });
 
 // הפעל WebSocket server
@@ -81,7 +94,7 @@ wss.on('connection', (ws) => {
 
   let callSid = null;
   let streamSid = null;
-  let bridge = null;
+  let pipeline = null;
 
   ws.on('message', async (message) => {
     try {
@@ -94,14 +107,21 @@ wss.on('connection', (ws) => {
           console.log(`📞 Call started: ${callSid}`);
 
           try {
-            // Create and initialize Audio Bridge
-            bridge = new AudioBridge(ws, callSid, streamSid, N8N_WEBHOOK_URL);
-            await bridge.initialize(OPENAI_API_KEY);
+            // Create and initialize Conversation Pipeline
+            const config = {
+              openaiApiKey: OPENAI_API_KEY,
+              elevenLabsApiKey: ELEVENLABS_API_KEY,
+              elevenLabsVoiceId: ELEVENLABS_VOICE_ID,
+              n8nWebhookUrl: N8N_WEBHOOK_URL
+            };
 
-            // Store bridge
-            activeCalls.set(callSid, bridge);
+            pipeline = new ConversationPipeline(ws, callSid, streamSid, config);
+            await pipeline.initialize();
 
-            console.log(`✅ Call ${callSid} ready - audio streaming active`);
+            // Store pipeline
+            activeCalls.set(callSid, pipeline);
+
+            console.log(`✅ Call ${callSid} ready - pipeline active`);
           } catch (error) {
             console.error(`❌ Failed to initialize call ${callSid}:`, error.message);
             ws.close();
@@ -109,18 +129,18 @@ wss.on('connection', (ws) => {
           break;
 
         case 'media':
-          // Forward audio to OpenAI via bridge
-          if (bridge) {
-            await bridge.handleTwilioAudio(msg.media.payload);
+          // Forward audio to pipeline
+          if (pipeline) {
+            await pipeline.handleAudio(msg.media.payload);
           } else {
-            console.warn(`⚠️  No bridge for call ${callSid}`);
+            console.warn(`⚠️  No pipeline for call ${callSid}`);
           }
           break;
 
         case 'stop':
           console.log(`📞 Call ended: ${callSid}`);
-          if (bridge) {
-            bridge.close();
+          if (pipeline) {
+            pipeline.close();
           }
           activeCalls.delete(callSid);
           break;
@@ -133,9 +153,9 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('📞 WebSocket connection closed');
     if (callSid) {
-      const existingBridge = activeCalls.get(callSid);
-      if (existingBridge) {
-        existingBridge.close();
+      const existingPipeline = activeCalls.get(callSid);
+      if (existingPipeline) {
+        existingPipeline.close();
       }
       activeCalls.delete(callSid);
     }
