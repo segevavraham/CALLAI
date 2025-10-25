@@ -66,15 +66,37 @@ class WhisperClient {
    * @returns {Buffer} - WAV audio buffer
    */
   convertMulawToWav(base64Chunks) {
+    console.log(`🔄 Converting ${base64Chunks.length} μ-law chunks to WAV...`);
+
+    // Debug: sample chunk sizes
+    if (base64Chunks.length > 0) {
+      const sampleSizes = base64Chunks.slice(0, 5).map(c => c.length);
+      console.log(`   🔍 Sample chunk sizes (base64): ${sampleSizes.join(', ')} characters`);
+    }
+
     // Combine all chunks
     const mulawBase64 = base64Chunks.join('');
+    console.log(`   🔗 Combined base64: ${mulawBase64.length} characters`);
+
     const mulawBuffer = Buffer.from(mulawBase64, 'base64');
+
+    console.log(`   📊 Raw μ-law data: ${mulawBuffer.length} bytes`);
+    console.log(`   ⏱️  Duration: ~${(mulawBuffer.length / 8000).toFixed(2)}s at 8kHz`);
+
+    // Validate minimum duration
+    if (mulawBuffer.length < 800) { // 0.1s at 8kHz
+      console.warn(`   ⚠️  WARNING: Audio too short (${mulawBuffer.length} bytes, need 800+)`);
+    }
 
     // Create WAV header for μ-law (G.711)
     const wavHeader = this.createWavHeader(mulawBuffer.length, 8000, 1, 7); // format 7 = μ-law
 
     // Combine header + data
-    return Buffer.concat([wavHeader, mulawBuffer]);
+    const wavBuffer = Buffer.concat([wavHeader, mulawBuffer]);
+
+    console.log(`   ✅ WAV created: ${wavBuffer.length} bytes (${wavHeader.length} header + ${mulawBuffer.length} data)`);
+
+    return wavBuffer;
   }
 
   /**

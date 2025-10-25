@@ -43,7 +43,7 @@ class N8nLogger {
 
     try {
       await axios.post(this.webhookUrl, payload, {
-        timeout: 5000, // 5s timeout
+        timeout: 10000, // 10s timeout (increased for reliability)
         headers: { 'Content-Type': 'application/json' }
       });
 

@@ -62,7 +62,37 @@ class ConversationPipeline {
     // Log call started
     this.n8nLogger.logCallStarted(this.callSid, this.streamSid);
 
+    // Send greeting message
+    await this.sendGreeting();
+
     return true;
+  }
+
+  /**
+   * Send greeting message to start the conversation
+   */
+  async sendGreeting() {
+    try {
+      console.log('👋 Sending greeting message...');
+
+      const greetingText = 'היי, נעים מאוד! מה שלומך?';
+
+      // Generate audio using HTTP (simpler for single message)
+      const mp3Buffer = await this.elevenlabsHTTP.textToSpeech(greetingText);
+      const mulawBuffer = await this.convertMp3ToMulaw(mp3Buffer);
+
+      // Send to Twilio
+      this.isSpeaking = true;
+      await this.sendAudioToTwilio(mulawBuffer);
+      this.isSpeaking = false;
+
+      // Add to conversation history
+      this.gpt4.addAssistantMessage(greetingText);
+
+      console.log('✅ Greeting sent successfully');
+    } catch (error) {
+      console.error('❌ Failed to send greeting:', error.message);
+    }
   }
 
   /**
