@@ -72,16 +72,44 @@ class WhisperClient {
     if (base64Chunks.length > 0) {
       const sampleSizes = base64Chunks.slice(0, 5).map(c => c.length);
       console.log(`   🔍 Sample chunk sizes (base64): ${sampleSizes.join(', ')} characters`);
+
+      // Test decode a single chunk
+      try {
+        const singleChunk = base64Chunks[0];
+        const singleDecoded = Buffer.from(singleChunk, 'base64');
+        console.log(`   🧪 Single chunk test: ${singleChunk.length} chars → ${singleDecoded.length} bytes`);
+
+        // Check for non-base64 characters
+        const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+        const isValidBase64 = base64Regex.test(singleChunk);
+        console.log(`   ✓ First chunk is valid base64: ${isValidBase64}`);
+      } catch (error) {
+        console.error(`   ❌ Error decoding single chunk:`, error.message);
+      }
     }
 
     // Combine all chunks
     const mulawBase64 = base64Chunks.join('');
     console.log(`   🔗 Combined base64: ${mulawBase64.length} characters`);
 
-    const mulawBuffer = Buffer.from(mulawBase64, 'base64');
+    // Check combined string validity
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+    const isValid = base64Regex.test(mulawBase64);
+    console.log(`   ✓ Combined base64 is valid: ${isValid}`);
+
+    // Try to decode
+    let mulawBuffer;
+    try {
+      mulawBuffer = Buffer.from(mulawBase64, 'base64');
+      console.log(`   ✅ Decoded successfully: ${mulawBuffer.length} bytes`);
+    } catch (error) {
+      console.error(`   ❌ Decode error:`, error.message);
+      throw error;
+    }
 
     console.log(`   📊 Raw μ-law data: ${mulawBuffer.length} bytes`);
     console.log(`   ⏱️  Duration: ~${(mulawBuffer.length / 8000).toFixed(2)}s at 8kHz`);
+    console.log(`   📐 Expected bytes from base64: ~${Math.floor(mulawBase64.length * 3 / 4)}`);
 
     // Validate minimum duration
     if (mulawBuffer.length < 800) { // 0.1s at 8kHz
