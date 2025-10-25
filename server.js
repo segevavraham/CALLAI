@@ -82,7 +82,7 @@ const server = app.listen(PORT, () => {
   console.log(`   📊 n8n Analytics - ${N8N_WEBHOOK_URL ? 'Enabled' : 'Disabled'}`);
   console.log(`\n🎙️  Voice Settings:`);
   console.log(`   Voice ID: ${ELEVENLABS_VOICE_ID}`);
-  console.log(`   Model: eleven_turbo_v2_5 (v3 with Hebrew)`);
+  console.log(`   Model: eleven_v3 (Hebrew support)`);
   console.log(`   Style: Alpha (most human-like)\n`);
 });
 

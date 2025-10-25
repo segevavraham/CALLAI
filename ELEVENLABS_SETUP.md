@@ -150,7 +150,7 @@ You should see:
 
 🎙️  Voice Settings:
    Voice ID: exsUS4vynmxd379XN4yO
-   Model: eleven_turbo_v2_5 (v3 with Hebrew)
+   Model: eleven_v3 (Hebrew support)
    Style: Alpha (most human-like)
 ```
 
