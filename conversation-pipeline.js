@@ -212,6 +212,14 @@ class ConversationPipeline {
     try {
       // Step 1: Whisper STT
       const whisperStart = Date.now();
+
+      console.log(`🔍 DEBUG: About to convert ${chunks.length} chunks to WAV`);
+      console.log(`   First 3 chunk types: ${chunks.slice(0, 3).map(c => typeof c).join(', ')}`);
+      console.log(`   First 3 chunk lengths: ${chunks.slice(0, 3).map(c => c ? c.length : 0).join(', ')}`);
+      if (chunks.length > 0 && chunks[0]) {
+        console.log(`   First chunk preview (first 50 chars): "${chunks[0].substring(0, 50)}..."`);
+      }
+
       const wavBuffer = this.whisper.convertMulawToWav(chunks);
       const userText = await this.whisper.transcribe(wavBuffer, 'he');
       timings.whisper = Date.now() - whisperStart;
