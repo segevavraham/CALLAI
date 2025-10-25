@@ -1,9 +1,10 @@
 // Conversation Pipeline: Whisper → GPT-4 → ElevenLabs
 // Handles real-time voice conversation with Hebrew TTS
+// NOW WITH GPT-4 STREAMING for faster responses!
 
 const WhisperClient = require('./whisper-client');
 const GPT4StreamingClient = require('./gpt4-streaming');
-const { ElevenLabsHTTP } = require('./elevenlabs-client');
+const { ElevenLabsHTTP, ElevenLabsClient } = require('./elevenlabs-client');
 const N8nLogger = require('./n8n-logger');
 const { spawn } = require('child_process');
 const fs = require('fs').promises;
@@ -18,7 +19,9 @@ class ConversationPipeline {
     // Initialize clients
     this.whisper = new WhisperClient(config.openaiApiKey);
     this.gpt4 = new GPT4StreamingClient(config.openaiApiKey);
-    this.elevenlabs = new ElevenLabsHTTP(config.elevenLabsApiKey, config.elevenLabsVoiceId);
+    this.elevenlabsHTTP = new ElevenLabsHTTP(config.elevenLabsApiKey, config.elevenLabsVoiceId);
+    this.elevenLabsVoiceId = config.elevenLabsVoiceId;
+    this.elevenLabsApiKey = config.elevenLabsApiKey;
 
     // n8n logger
     this.n8nLogger = new N8nLogger(config.n8nWebhookUrl);
@@ -42,13 +45,18 @@ class ConversationPipeline {
     };
 
     console.log(`🌉 Conversation Pipeline initialized for ${callSid}`);
+    console.log(`   🎤 STT: Whisper`);
+    console.log(`   🤖 LLM: GPT-4 (streaming)`);
+    console.log(`   🎵 TTS: ElevenLabs v3 WebSocket (streaming)`);
+    console.log(`   🎙️  Voice: ${config.elevenLabsVoiceId}`);
   }
 
   /**
    * Initialize pipeline
    */
   async initialize() {
-    console.log('✅ Pipeline ready (Whisper + GPT-4 + ElevenLabs v3)');
+    console.log('✅ Pipeline ready - STREAMING MODE');
+    console.log('   ⚡ Real-time: GPT-4 → ElevenLabs WebSocket → Twilio');
 
     // Log call started
     this.n8nLogger.logCallStarted(this.callSid, this.streamSid);
@@ -85,7 +93,8 @@ class ConversationPipeline {
   }
 
   /**
-   * Process buffered audio through pipeline
+   * Process buffered audio through pipeline with STREAMING
+   * GPT-4 streams → ElevenLabs WebSocket → Twilio (real-time!)
    */
   async processBufferedAudio() {
     if (this.isProcessing || this.audioBuffer.length < this.MIN_AUDIO_CHUNKS) {
@@ -105,11 +114,14 @@ class ConversationPipeline {
     const timings = {
       start: Date.now(),
       whisper: 0,
-      gpt4: 0,
-      elevenlabs: 0,
-      conversion: 0,
+      gpt4FirstToken: 0,
+      gpt4Total: 0,
+      elevenLabsFirstChunk: 0,
+      elevenLabsTotal: 0,
       total: 0
     };
+
+    let elevenLabsClient = null;
 
     try {
       // Step 1: Whisper STT
@@ -130,52 +142,128 @@ class ConversationPipeline {
       // Log to n8n
       this.n8nLogger.logUserTranscript(this.callSid, userText, this.stats.turns + 1);
 
-      // Step 2: GPT-4 Response (sync for now - can optimize with streaming later)
+      // Step 2: Initialize ElevenLabs WebSocket for streaming
+      console.log('🔌 Connecting to ElevenLabs WebSocket...');
+      const ElevenLabsClient = require('./elevenlabs-client').ElevenLabsClient;
+      elevenLabsClient = new ElevenLabsClient(this.elevenLabsApiKey, this.elevenLabsVoiceId);
+
+      await elevenLabsClient.connect();
+
+      // Prepare to stream audio to Twilio
+      let audioChunksReceived = 0;
+      let firstChunkTime = null;
+      const mp3Chunks = [];
+
+      // Set up ElevenLabs audio streaming
+      elevenLabsClient.on('audio', (mp3Chunk) => {
+        audioChunksReceived++;
+
+        if (!firstChunkTime) {
+          firstChunkTime = Date.now();
+          timings.elevenLabsFirstChunk = firstChunkTime - timings.start;
+          console.log(`🎵 First audio chunk received (${timings.elevenLabsFirstChunk}ms from start)`);
+        }
+
+        // Collect MP3 chunks for batch conversion
+        mp3Chunks.push(mp3Chunk);
+      });
+
+      let streamComplete = false;
+      elevenLabsClient.on('complete', () => {
+        streamComplete = true;
+        console.log(`✅ ElevenLabs streaming complete (${audioChunksReceived} chunks)`);
+      });
+
+      // Step 3: Stream GPT-4 response to ElevenLabs
       const gpt4Start = Date.now();
-      const aiText = await this.gpt4.generateResponseSync(userText);
-      timings.gpt4 = Date.now() - gpt4Start;
+      let aiText = '';
+      let firstTokenTime = null;
+
+      console.log('🤖 Starting GPT-4 streaming...');
+
+      // Set up GPT-4 token streaming
+      this.gpt4.on('token', (token) => {
+        if (!firstTokenTime) {
+          firstTokenTime = Date.now();
+          timings.gpt4FirstToken = firstTokenTime - gpt4Start;
+          console.log(`⚡ First GPT-4 token (${timings.gpt4FirstToken}ms)`);
+        }
+
+        aiText += token;
+
+        // Stream token to ElevenLabs
+        elevenLabsClient.sendText(token);
+      });
+
+      // Generate streaming response
+      await this.gpt4.generateResponse(userText);
+      timings.gpt4Total = Date.now() - gpt4Start;
+
+      // Signal ElevenLabs that text is complete
+      elevenLabsClient.finishInput();
 
       if (!aiText || aiText.trim().length === 0) {
         console.log('⚠️  No GPT-4 response');
+        elevenLabsClient.close();
         this.isProcessing = false;
         return;
       }
 
       this.stats.responses++;
-      console.log(`🤖 AI: "${aiText}" (${timings.gpt4}ms)`);
+      console.log(`🤖 AI: "${aiText}" (${timings.gpt4Total}ms total)`);
 
       // Log to n8n
       this.n8nLogger.logAITranscript(this.callSid, aiText, this.stats.turns + 1);
 
-      // Step 3: ElevenLabs TTS
-      const elevenLabsStart = Date.now();
-      const mp3Buffer = await this.elevenlabs.textToSpeech(aiText);
-      timings.elevenlabs = Date.now() - elevenLabsStart;
+      // Wait for all audio chunks
+      console.log('⏳ Waiting for all audio chunks...');
+      const maxWait = 10000; // 10 seconds max
+      const waitStart = Date.now();
 
-      console.log(`🎤 ElevenLabs generated ${mp3Buffer.length} bytes (${timings.elevenlabs}ms)`);
+      while (!streamComplete && (Date.now() - waitStart < maxWait)) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      timings.elevenLabsTotal = Date.now() - gpt4Start;
+
+      if (mp3Chunks.length === 0) {
+        console.log('⚠️  No audio received from ElevenLabs');
+        elevenLabsClient.close();
+        this.isProcessing = false;
+        return;
+      }
+
+      // Combine all MP3 chunks
+      const fullMp3Buffer = Buffer.concat(mp3Chunks);
+      console.log(`🎵 Received ${fullMp3Buffer.length} bytes of audio in ${audioChunksReceived} chunks`);
 
       // Step 4: Convert MP3 to μ-law for Twilio
       const conversionStart = Date.now();
-      const mulawBuffer = await this.convertMp3ToMulaw(mp3Buffer);
-      timings.conversion = Date.now() - conversionStart;
+      const mulawBuffer = await this.convertMp3ToMulaw(fullMp3Buffer);
+      const conversionTime = Date.now() - conversionStart;
 
-      console.log(`🔄 Converted to μ-law: ${mulawBuffer.length} bytes (${timings.conversion}ms)`);
+      console.log(`🔄 Converted to μ-law: ${mulawBuffer.length} bytes (${conversionTime}ms)`);
 
       // Step 5: Send to Twilio
       this.isSpeaking = true;
       await this.sendAudioToTwilio(mulawBuffer);
       this.isSpeaking = false;
 
+      // Close ElevenLabs connection
+      elevenLabsClient.close();
+
       // Update stats
       this.stats.turns++;
       timings.total = Date.now() - timings.start;
 
       // Log timings
-      console.log(`\n⏱️  TIMING BREAKDOWN:`);
+      console.log(`\n⏱️  STREAMING TIMING BREAKDOWN:`);
       console.log(`   🎤 Whisper STT: ${timings.whisper}ms`);
-      console.log(`   🤖 GPT-4: ${timings.gpt4}ms`);
-      console.log(`   🎵 ElevenLabs TTS: ${timings.elevenlabs}ms`);
-      console.log(`   🔄 Audio conversion: ${timings.conversion}ms`);
+      console.log(`   ⚡ GPT-4 first token: ${timings.gpt4FirstToken}ms`);
+      console.log(`   🤖 GPT-4 total: ${timings.gpt4Total}ms`);
+      console.log(`   🎵 ElevenLabs first chunk: ${timings.elevenLabsFirstChunk}ms`);
+      console.log(`   🎵 ElevenLabs total: ${timings.elevenLabsTotal}ms`);
+      console.log(`   🔄 Audio conversion: ${conversionTime}ms`);
       console.log(`   ✅ TOTAL: ${timings.total}ms\n`);
 
       // Log turn completed to n8n
@@ -184,6 +272,11 @@ class ConversationPipeline {
     } catch (error) {
       console.error('❌ Pipeline error:', error.message);
       this.n8nLogger.logError(this.callSid, error, 'conversation_pipeline');
+
+      // Close ElevenLabs connection if open
+      if (elevenLabsClient) {
+        elevenLabsClient.close();
+      }
 
       // Send error message to user
       await this.sendErrorMessage();
@@ -286,7 +379,7 @@ class ConversationPipeline {
   async sendErrorMessage() {
     try {
       const errorText = 'סליחה, נתקלתי בבעיה טכנית. אנא נסה שוב.';
-      const mp3Buffer = await this.elevenlabs.textToSpeech(errorText);
+      const mp3Buffer = await this.elevenlabsHTTP.textToSpeech(errorText);
       const mulawBuffer = await this.convertMp3ToMulaw(mp3Buffer);
       await this.sendAudioToTwilio(mulawBuffer);
     } catch (error) {
