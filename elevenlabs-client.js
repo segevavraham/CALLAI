@@ -22,7 +22,7 @@ class ElevenLabsClient extends EventEmitter {
       console.log(`🎤 Connecting to ElevenLabs v3 (voice: ${this.voiceId})...`);
 
       // ElevenLabs WebSocket URL for text-to-speech streaming
-      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_turbo_v2_5`;
+      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_v3`;
 
       this.ws = new WebSocket(wsUrl, {
         headers: {
@@ -174,7 +174,7 @@ class ElevenLabsHTTP {
 
     const payload = {
       text: text,
-      model_id: 'eleven_turbo_v2_5', // v3 with Hebrew support
+      model_id: 'eleven_v3', // v3 with Hebrew support
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.8,
