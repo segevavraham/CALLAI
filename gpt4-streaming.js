@@ -3,6 +3,7 @@
 
 const axios = require('axios');
 const EventEmitter = require('events');
+const { CONVERSATION_STAGES } = require('./conversation-flow');
 
 class GPT4StreamingClient extends EventEmitter {
   constructor(apiKey, systemPrompt = null) {
@@ -10,8 +11,10 @@ class GPT4StreamingClient extends EventEmitter {
     this.apiKey = apiKey;
     this.baseUrl = 'https://api.openai.com/v1/chat/completions';
     this.conversationHistory = [];
-    this.customerName = null; // שם הלקוח
     this.systemPrompt = systemPrompt || this.getDefaultSalesPrompt();
+
+    // Agent identity
+    this.agentName = process.env.AGENT_NAME || 'דני';
   }
 
   /**
@@ -62,6 +65,124 @@ class GPT4StreamingClient extends EventEmitter {
   }
 
   /**
+   * Generate dynamic system prompt based on conversation memory
+   * This creates a contextual prompt that adapts to the current stage
+   *
+   * @param {Object} memory - ConversationMemory instance
+   * @returns {string} Dynamic system prompt
+   */
+  generateSystemPrompt(memory) {
+    const stage = CONVERSATION_STAGES[memory.currentStage];
+    const context = memory.getContextForPrompt();
+
+    // Format recent messages for context
+    const recentConversation = context.recentMessages
+      .map(m => `   ${m.role === 'agent' ? '🤖 ' + this.agentName : '👤 לקוח'}: ${m.text}`)
+      .join('\n');
+
+    // Sentiment emoji
+    const sentimentEmoji = {
+      positive: '😊',
+      neutral: '😐',
+      negative: '😞'
+    }[context.sentiment] || '😐';
+
+    const prompt = `
+אתה ${this.agentName}, סוכן מכירות מקצועי ומנוסה בעברית. אתה מדבר עברית שוטפת וטבעית.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 מידע על השיחה הנוכחית:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 לקוח:
+   ${context.customerName ? `- שם: ${context.customerName} (❗ השתמש בשם בכל תגובה שנייה)` : '- שם: טרם נאסף (❗ עדיפות גבוהה לאסוף!)'}
+   - רגש כללי: ${sentimentEmoji} ${context.sentiment === 'positive' ? 'חיובי' : context.sentiment === 'negative' ? 'שלילי' : 'ניטרלי'}
+
+📝 צרכים שזוהו:
+   ${context.needs.length > 0 ? context.needs.map((n, i) => `${i + 1}. ${n}`).join('\n   ') : '❌ עדיין לא זוהו צרכים - זו עדיפות!'}
+
+⚠️  התנגדויות שהועלו:
+   ${context.objections.length > 0 ? context.objections.map((o, i) => `${i + 1}. ${o}`).join('\n   ') : '✅ אין התנגדויות'}
+
+⭐ נקודות עניין:
+   ${context.interests.length > 0 ? context.interests.map((int, i) => `${i + 1}. ${int}`).join('\n   ') : 'אין עדיין'}
+
+💬 היסטוריית שיחה אחרונה (3 חילופים אחרונים):
+${recentConversation || '   (התחלת שיחה)'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 השלב הנוכחי: ${stage.name} (תור ${context.stageTurnCount}/${stage.maxTurns || '∞'})
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📌 המטרה שלך עכשיו:
+   ${stage.agentGoal}
+
+💡 מה עליך לעשות:
+   ${stage.agentAction}
+
+⏭️  מה אני מצפה מהלקוח:
+   ${stage.expectedCustomerInput}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📜 כללי התנהגות (CRITICAL - קרא בעיון!)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ חובה:
+1. **קצר וממוקד**: 1-2 משפטים בלבד! זו שיחת טלפון, לא מסמך.
+2. **שאלה אחת**: שאל שאלה אחת בכל תגובה (לא יותר!).
+3. **שימוש בשם**: ${context.customerName ? `תשתמש בשם "${context.customerName}" באופן טבעי` : 'אסוף את שם הלקוח בהקדם!'}.
+4. **טבעי**: דבר כמו בן אדם - לא רובוטי, לא פורמלי מדי.
+5. **טקסט נקי**: ללא *, #, bullet points, או סימנים מיוחדים.
+6. **רלוונטיות**: ענה רק לפי מה שהלקוח אמר עכשיו.
+7. **זכור**: השתמש במידע שאספת (צרכים, התנגדויות, נקודות עניין).
+8. **הקשב**: אם הלקוח אמר משהו חשוב - התייחס לזה!
+
+❌ אסור:
+1. תגובות ארוכות (מעל 3 משפטים)
+2. מספר שאלות בבת אחת
+3. להתעלם ממה שהלקוח אמר
+4. תשובות גנריות שלא קשורות לשיחה
+5. להשתמש במונחים טכניים מסובכים
+6. להשתמש באמוג'י בתשובות
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ דוגמאות לתגובות טובות מול גרועות
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+לקוח: "אני מחפש משהו שיעזור לי לחסוך כסף"
+
+❌ גרוע:
+"תודה על השיתוף! אנחנו מציעים מגוון פתרונות שיכולים לעזור לך לחסוך כסף. יש לנו מספר אופציות שונות, כולל תוכניות חיסכון, ייעוץ פיננסי, ועוד. מה מתאים לך יותר?"
+
+✅ מצוין:
+"הבנתי שחיסכון חשוב לך. ספר לי, מדובר על חיסכון חודשי או לקראת מטרה מסוימת?"
+
+---
+
+לקוח: "זה נשמע יקר"
+
+❌ גרוע:
+"אני מבין את החשש שלך. המחיר שלנו משקף את האיכות הגבוהה של המוצר. בנוסף, יש לנו מבצעים והנחות שיכולים לעזור."
+
+✅ מצוין:
+"${context.customerName ? context.customerName + ', ' : ''}אני מבין. מה הטווח תקציבי שנוח לך?"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎬 עכשיו תורך!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ענה ללקוח בהתאם להנחיות לעיל. זכור:
+- קצר (1-2 משפטים)
+- טבעי ורלוונטי
+- שאלה אחת
+${context.customerName ? `- השתמש בשם "${context.customerName}"` : ''}
+${stage.priority === 'critical' ? '\n⚠️  שלב זה קריטי - הצלחה כאן תקבע את כל השיחה!' : ''}
+`;
+
+    return prompt.trim();
+  }
+
+  /**
    * Get conversation history
    */
   getHistory() {
@@ -96,21 +217,30 @@ class GPT4StreamingClient extends EventEmitter {
   }
 
   /**
-   * Generate streaming response
+   * Generate streaming response with conversation memory context
    * Emits 'token' events for each token
    * Emits 'complete' event with full text when done
+   *
+   * @param {string} userMessage - User's message
+   * @param {Object} memory - ConversationMemory instance (optional)
    */
-  async generateResponse(userMessage) {
+  async generateResponse(userMessage, memory = null) {
     // Add user message to history
     this.addUserMessage(userMessage);
 
+    // Build system prompt (dynamic if memory provided, otherwise default)
+    const systemPrompt = memory ? this.generateSystemPrompt(memory) : this.systemPrompt;
+
     // Build messages array
     const messages = [
-      { role: 'system', content: this.systemPrompt },
+      { role: 'system', content: systemPrompt },
       ...this.conversationHistory
     ];
 
     console.log(`🤖 Generating GPT-4 response for: "${userMessage}"`);
+    if (memory) {
+      console.log(`   🎯 Stage: ${memory.currentStage} | Turn: ${memory.stageTurnCount}`);
+    }
 
     try {
       const response = await axios.post(

@@ -1,9 +1,14 @@
-// Twilio Media Streams <-> Whisper + GPT-4 + ElevenLabs v3 Pipeline
+// Twilio Media Streams <-> AI Voice Pipeline
 require('dotenv').config();
 
 const express = require('express');
 const WebSocket = require('ws');
-const ConversationPipeline = require('./conversation-pipeline');
+
+// Choose pipeline version
+const PIPELINE_VERSION = process.env.PIPELINE_VERSION || 'v2';
+const ConversationPipeline = PIPELINE_VERSION === 'v2'
+  ? require('./conversation-pipeline-v2')
+  : require('./conversation-pipeline');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -73,17 +78,32 @@ app.get('/voice', (req, res) => {
 
 // הפעל HTTP server
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Twilio ⟷ Whisper + GPT-4 + ElevenLabs v3 Pipeline`);
+  console.log(`\n${'━'.repeat(70)}`);
+  console.log(`🚀 CALLAI Server Started`);
+  console.log(`${'━'.repeat(70)}`);
+  console.log(`📡 Port: ${PORT}`);
+  console.log(`🎯 Pipeline Version: ${PIPELINE_VERSION.toUpperCase()}`);
   console.log(`\n✅ Pipeline Components:`);
-  console.log(`   🎤 Whisper API - Speech-to-Text (Hebrew)`);
-  console.log(`   🤖 GPT-4 - Conversation AI`);
-  console.log(`   🎵 ElevenLabs v3 - Natural Hebrew TTS`);
-  console.log(`   📊 n8n Analytics - ${N8N_WEBHOOK_URL ? 'Enabled' : 'Disabled'}`);
+
+  if (PIPELINE_VERSION === 'v2') {
+    console.log(`   🎤 STT: ElevenLabs (Hebrew optimized)`);
+    console.log(`   🤖 LLM: GPT-4 with dynamic prompts`);
+    console.log(`   🎵 TTS: ElevenLabs v3 (Hebrew)`);
+    console.log(`   🎯 State Machine: ENABLED`);
+    console.log(`   💾 Conversation Memory: ENABLED`);
+  } else {
+    console.log(`   🎤 STT: Whisper API (Hebrew)`);
+    console.log(`   🤖 LLM: GPT-4`);
+    console.log(`   🎵 TTS: ElevenLabs v3 (Hebrew)`);
+  }
+
+  console.log(`   📊 n8n Analytics: ${N8N_WEBHOOK_URL ? 'ENABLED' : 'DISABLED'}`);
+
   console.log(`\n🎙️  Voice Settings:`);
   console.log(`   Voice ID: ${ELEVENLABS_VOICE_ID}`);
-  console.log(`   Model: eleven_v3 (Hebrew support)`);
-  console.log(`   Style: Alpha (most human-like)\n`);
+  console.log(`   Agent Name: ${process.env.AGENT_NAME || 'דני'}`);
+
+  console.log(`\n${'━'.repeat(70)}\n`);
 });
 
 // הפעל WebSocket server
