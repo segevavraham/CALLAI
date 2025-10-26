@@ -11,7 +11,7 @@
  * Flow: Twilio → ElevenLabs STT → State Machine → GPT-4 → ElevenLabs TTS → Twilio
  */
 
-const ElevenLabsSTT = require('./elevenlabs-stt');
+const WhisperClient = require('./whisper-client');
 const GPT4StreamingClient = require('./gpt4-streaming');
 const { ElevenLabsHTTP } = require('./elevenlabs-client');
 const ConversationMemory = require('./conversation-memory');
@@ -32,7 +32,7 @@ class ConversationPipelineV2 {
     this.flowManager = new ConversationFlowManager(this.memory);
 
     // Initialize AI clients
-    this.stt = new ElevenLabsSTT(config.elevenLabsApiKey, config.openaiApiKey); // With Whisper fallback
+    this.stt = new WhisperClient(config.openaiApiKey); // Use Whisper directly (more reliable)
     this.gpt4 = new GPT4StreamingClient(config.openaiApiKey);
     this.tts = new ElevenLabsHTTP(config.elevenLabsApiKey, config.elevenLabsVoiceId);
 
@@ -45,18 +45,18 @@ class ConversationPipelineV2 {
     this.isSpeaking = false;
     this.silenceTimeout = null;
 
-    // Configuration (optimized for faster response)
-    this.SILENCE_TIMEOUT = 500; // ms - how long to wait after user stops speaking (reduced for faster response)
+    // Configuration (optimized for fast, natural response)
+    this.SILENCE_TIMEOUT = 400; // ms - how long to wait after user stops speaking (fast response)
     this.MIN_AUDIO_CHUNKS = 10; // minimum chunks before processing
-    this.MAX_BUFFER_SIZE = 120; // force processing after this many chunks (~2.4 seconds at 20ms/chunk)
+    this.MAX_BUFFER_SIZE = 60; // force processing after this many chunks (~1.2 seconds at 20ms/chunk - faster!)
 
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`🌉 Conversation Pipeline V2 initialized`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`📞 Call ID: ${callSid}`);
-    console.log(`🎤 STT: ElevenLabs (Hebrew optimized) + Whisper fallback`);
-    console.log(`🤖 LLM: GPT-4 with dynamic prompts`);
-    console.log(`🎵 TTS: ElevenLabs v3 (HTTP mode)`);
+    console.log(`🎤 STT: Whisper (OpenAI - proven reliable for Hebrew)`);
+    console.log(`🤖 LLM: GPT-4 with context-aware prompts`);
+    console.log(`🎵 TTS: ElevenLabs v3 (natural Hebrew voice)`);
     console.log(`🎯 State Machine: ENABLED`);
     console.log(`📊 n8n Webhook: ${this.n8nWebhook.enabled ? 'ENABLED' : 'DISABLED'}`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
@@ -81,8 +81,8 @@ class ConversationPipelineV2 {
     try {
       console.log('👋 Sending greeting message...');
 
-      // Get greeting from current stage (GREETING stage)
-      const greetingText = 'שלום! נעים להכיר. איך קוראים לך?';
+      // Get greeting from current stage (GREETING stage) - warm and natural
+      const greetingText = 'היי! נעים מאוד. איך קוראים לך?';
 
       // Add to conversation history
       this.memory.addMessage('agent', greetingText);
@@ -210,12 +210,12 @@ class ConversationPipelineV2 {
 
     try {
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // Step 1: Speech-to-Text (ElevenLabs STT)
+      // Step 1: Speech-to-Text (Whisper)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       const sttStart = Date.now();
 
-      // Convert μ-law to WAV for STT
-      const wavBuffer = this.convertMulawToWav(chunks);
+      // Convert μ-law chunks to WAV for Whisper
+      const wavBuffer = this.stt.convertMulawToWav(chunks);
       const userText = await this.stt.transcribe(wavBuffer, 'he');
 
       timings.stt = Date.now() - sttStart;
