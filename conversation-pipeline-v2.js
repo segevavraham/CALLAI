@@ -45,10 +45,10 @@ class ConversationPipelineV2 {
     this.isSpeaking = false;
     this.silenceTimeout = null;
 
-    // Configuration
-    this.SILENCE_TIMEOUT = 800; // ms - how long to wait after user stops speaking
+    // Configuration (optimized for faster response)
+    this.SILENCE_TIMEOUT = 500; // ms - how long to wait after user stops speaking (reduced for faster response)
     this.MIN_AUDIO_CHUNKS = 10; // minimum chunks before processing
-    this.MAX_BUFFER_SIZE = 400; // force processing after this many chunks
+    this.MAX_BUFFER_SIZE = 120; // force processing after this many chunks (~2.4 seconds at 20ms/chunk)
 
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`🌉 Conversation Pipeline V2 initialized`);
@@ -117,8 +117,8 @@ class ConversationPipelineV2 {
       }
       const rms = Math.sqrt(sum / audioBuffer.length);
 
-      // Threshold for speech detection
-      const SPEECH_THRESHOLD = 15;
+      // Threshold for speech detection (increased for better accuracy - filters out background noise)
+      const SPEECH_THRESHOLD = 50;
 
       // Log RMS value occasionally for debugging
       if (this.audioBuffer.length % 100 === 0 && this.audioBuffer.length > 0) {
