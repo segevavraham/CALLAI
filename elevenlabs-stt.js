@@ -6,56 +6,64 @@
  */
 
 const FormData = require('form-data');
+const { spawn } = require('child_process');
+const WhisperClient = require('./whisper-client');
 
 class ElevenLabsSTT {
-  constructor(apiKey) {
+  constructor(apiKey, openaiApiKey = null) {
     this.apiKey = apiKey;
     this.apiUrl = 'https://api.elevenlabs.io/v1/speech-to-text';
+
+    // Whisper fallback (if OpenAI API key provided)
+    this.whisper = openaiApiKey ? new WhisperClient(openaiApiKey) : null;
+    this.failureCount = 0;
+    this.USE_WHISPER_AFTER_FAILURES = 2; // Switch to Whisper after N consecutive failures
   }
 
   /**
-   * Create a valid WAV file from PCM data
-   * @param {Buffer} pcmData - Raw PCM audio data (16-bit linear)
-   * @param {number} sampleRate - Sample rate (default: 8000 for Twilio)
-   * @returns {Buffer} Valid WAV file buffer
+   * Convert μ-law audio to PCM WAV using ffmpeg
+   * Twilio sends μ-law (8-bit, 8kHz) but ElevenLabs needs PCM WAV
+   *
+   * @param {Buffer} mulawBuffer - Raw μ-law audio data from Twilio
+   * @returns {Promise<Buffer>} PCM WAV file buffer
    */
-  createWavFile(pcmData, sampleRate = 8000) {
-    const numChannels = 1; // Mono
-    const bitsPerSample = 16; // 16-bit PCM
-    const blockAlign = numChannels * (bitsPerSample / 8);
-    const byteRate = sampleRate * blockAlign;
-    const dataSize = pcmData.length;
-    const fileSize = 36 + dataSize; // 44 bytes header - 8 + data size
+  async convertMulawToWav(mulawBuffer) {
+    return new Promise((resolve, reject) => {
+      const ffmpeg = spawn('ffmpeg', [
+        '-f', 'mulaw',        // Input format: μ-law
+        '-ar', '8000',        // Sample rate: 8000 Hz (Twilio)
+        '-ac', '1',           // Channels: 1 (mono)
+        '-i', 'pipe:0',       // Input from stdin
+        '-f', 'wav',          // Output format: WAV
+        '-ar', '16000',       // Upsample to 16kHz for better STT quality
+        '-ac', '1',           // Keep mono
+        '-acodec', 'pcm_s16le', // PCM 16-bit little-endian
+        'pipe:1'              // Output to stdout
+      ]);
 
-    const header = Buffer.alloc(44);
+      const chunks = [];
 
-    // RIFF chunk descriptor
-    header.write('RIFF', 0);
-    header.writeUInt32LE(fileSize, 4);
-    header.write('WAVE', 8);
+      ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
+      ffmpeg.stderr.on('data', () => {}); // Ignore ffmpeg logs
 
-    // fmt sub-chunk
-    header.write('fmt ', 12);
-    header.writeUInt32LE(16, 16); // Subchunk1Size (16 for PCM)
-    header.writeUInt16LE(1, 20); // AudioFormat (1 for PCM)
-    header.writeUInt16LE(numChannels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(byteRate, 28);
-    header.writeUInt16LE(blockAlign, 32);
-    header.writeUInt16LE(bitsPerSample, 34);
+      ffmpeg.on('close', code => {
+        if (code === 0) {
+          resolve(Buffer.concat(chunks));
+        } else {
+          reject(new Error(`ffmpeg exited with code ${code}`));
+        }
+      });
 
-    // data sub-chunk
-    header.write('data', 36);
-    header.writeUInt32LE(dataSize, 40);
-
-    // Combine header and PCM data
-    return Buffer.concat([header, pcmData]);
+      ffmpeg.on('error', reject);
+      ffmpeg.stdin.write(mulawBuffer);
+      ffmpeg.stdin.end();
+    });
   }
 
   /**
    * Transcribe audio buffer to Hebrew text
    *
-   * @param {Buffer} audioBuffer - Raw PCM audio buffer (will be converted to WAV)
+   * @param {Buffer} audioBuffer - Raw μ-law audio buffer from Twilio
    * @param {string} language - Language code (default: 'he' for Hebrew)
    * @returns {Promise<string>} Transcribed text
    */
@@ -63,8 +71,12 @@ class ElevenLabsSTT {
     try {
       const startTime = Date.now();
 
-      // Create valid WAV file from PCM data
-      const wavBuffer = this.createWavFile(audioBuffer);
+      console.log(`🎤 ElevenLabs STT: Converting ${audioBuffer.length} bytes of μ-law audio...`);
+
+      // Convert μ-law to PCM WAV
+      const wavBuffer = await this.convertMulawToWav(audioBuffer);
+
+      console.log(`   ✅ Converted to ${wavBuffer.length} bytes WAV (16kHz PCM)`);
 
       // Create form data
       const form = new FormData();
@@ -73,6 +85,8 @@ class ElevenLabsSTT {
         contentType: 'audio/wav'
       });
       form.append('language', language);
+
+      console.log(`   📤 Sending to ElevenLabs STT API...`);
 
       // Make API request
       const response = await fetch(this.apiUrl, {
@@ -106,8 +120,22 @@ class ElevenLabsSTT {
 
     } catch (error) {
       console.error('❌ ElevenLabs STT error:', error.message);
+      this.failureCount++;
 
-      // Fallback: return empty string instead of throwing
+      // Try Whisper fallback if available
+      if (this.whisper && this.failureCount >= this.USE_WHISPER_AFTER_FAILURES) {
+        console.log(`   🔄 Switching to Whisper fallback (${this.failureCount} consecutive failures)...`);
+        try {
+          // Whisper can handle raw μ-law directly
+          const text = await this.whisper.transcribe(audioBuffer, 'he');
+          this.failureCount = 0; // Reset on success
+          return text;
+        } catch (whisperError) {
+          console.error('❌ Whisper fallback also failed:', whisperError.message);
+        }
+      }
+
+      // No fallback or all methods failed: return empty string
       // This allows conversation to continue even if STT fails
       return '';
     }

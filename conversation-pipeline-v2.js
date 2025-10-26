@@ -32,7 +32,7 @@ class ConversationPipelineV2 {
     this.flowManager = new ConversationFlowManager(this.memory);
 
     // Initialize AI clients
-    this.stt = new ElevenLabsSTT(config.elevenLabsApiKey);
+    this.stt = new ElevenLabsSTT(config.elevenLabsApiKey, config.openaiApiKey); // With Whisper fallback
     this.gpt4 = new GPT4StreamingClient(config.openaiApiKey);
     this.tts = new ElevenLabsHTTP(config.elevenLabsApiKey, config.elevenLabsVoiceId);
 
@@ -54,7 +54,7 @@ class ConversationPipelineV2 {
     console.log(`🌉 Conversation Pipeline V2 initialized`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`📞 Call ID: ${callSid}`);
-    console.log(`🎤 STT: ElevenLabs (Hebrew optimized)`);
+    console.log(`🎤 STT: ElevenLabs (Hebrew optimized) + Whisper fallback`);
     console.log(`🤖 LLM: GPT-4 with dynamic prompts`);
     console.log(`🎵 TTS: ElevenLabs v3 (HTTP mode)`);
     console.log(`🎯 State Machine: ENABLED`);
