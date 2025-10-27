@@ -22,8 +22,8 @@ class ElevenLabsClient extends EventEmitter {
       console.log(`🎤 Connecting to ElevenLabs v3 (voice: ${this.voiceId})...`);
 
       // ElevenLabs WebSocket URL for text-to-speech streaming
-      // Note: Using eleven_turbo_v2_5 for WebSocket (eleven_v3 doesn't support WebSocket)
-      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_turbo_v2_5`;
+      // Using eleven_turbo_v2_5 - fastest and highest quality for Hebrew
+      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_turbo_v2_5&optimize_streaming_latency=3`;
 
       this.ws = new WebSocket(wsUrl, {
         headers: {
@@ -35,19 +35,17 @@ class ElevenLabsClient extends EventEmitter {
         console.log('✅ Connected to ElevenLabs v3');
         this.isConnected = true;
 
-        // Send initial configuration with Hebrew language + expressive settings
+        // Send initial configuration optimized for Hebrew quality
         const config = {
           text: ' ',
           voice_settings: {
-            stability: 0.4,        // Balanced for natural speech with emotion
-            similarity_boost: 0.85, // Maintain voice character
-            style: 0.6,            // Expressive delivery for human-like speech
+            stability: 0.5,        // Balanced stability for clear, natural speech
+            similarity_boost: 0.75, // Natural voice similarity
             use_speaker_boost: true
           },
           generation_config: {
             chunk_length_schedule: [120, 160, 250, 290] // Optimized for streaming
           },
-          language_code: 'he',  // Force Hebrew language (ISO 639-1)
           xi_api_key: this.apiKey
         };
 
@@ -230,21 +228,20 @@ class ElevenLabsHTTP {
   async textToSpeech(text) {
     const axios = require('axios');
 
-    // Add Hebrew nikud for better pronunciation
-    const nikudText = await this.addHebrewNikud(text);
+    // DO NOT add nikud - ElevenLabs handles Hebrew natively and nikud can break pronunciation
+    console.log(`🎵 Generating TTS for: "${text}"`);
 
     const url = `${this.baseUrl}/text-to-speech/${this.voiceId}`;
 
     const payload = {
-      text: nikudText,
-      model_id: 'eleven_multilingual_v2', // v2 multilingual supports Hebrew with [stage directions]
+      text: text,  // Use original text without nikud
+      model_id: 'eleven_turbo_v2_5', // Fastest, highest quality model with Hebrew support
       voice_settings: {
-        stability: 0.4,            // Balanced for natural speech with emotion
-        similarity_boost: 0.85,    // Maintain voice character
-        style: 0.6,                // Expressive delivery for human-like speech
+        stability: 0.5,            // Balanced stability for clear speech
+        similarity_boost: 0.75,    // Natural voice similarity
+        style: 0.0,                // No extra style (v2_5 doesn't use this)
         use_speaker_boost: true    // Enhance voice clarity
-      },
-      language_code: 'he'          // Force Hebrew language
+      }
     };
 
     console.log(`🎵 TTS settings: stability=${payload.voice_settings.stability}, style=${payload.voice_settings.style}`);
