@@ -51,15 +51,18 @@ class ConversationPipelineV2 {
     this.MAX_BUFFER_SIZE = 60; // force processing after this many chunks (~1.2 seconds at 20ms/chunk - faster!)
 
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    console.log(`🌉 Conversation Pipeline V2 initialized`);
+    console.log(`🌉 Conversation Pipeline V2 - Professional Hebrew AI`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`📞 Call ID: ${callSid}`);
     console.log(`🎤 STT: Whisper (OpenAI - proven reliable for Hebrew)`);
-    console.log(`🤖 LLM: GPT-4 with context-aware prompts`);
-    console.log(`🎵 TTS: ElevenLabs multilingual_v2 + Hebrew nikud (vowel points)`);
-    console.log(`   📝 Nikud: ENABLED (GPT-4 adds vowel points for perfect pronunciation)`);
-    console.log(`   🎭 Voice: High expressiveness (stability=0.35, style=0.65)`);
-    console.log(`🎯 State Machine: ENABLED`);
+    console.log(`🤖 LLM: GPT-4 with stage directions ([chuckles], [laughing])`);
+    console.log(`🎵 TTS: ElevenLabs multilingual_v2 + Hebrew nikud`);
+    console.log(`   🗣️  Voice ID: ${config.elevenLabsVoiceId || 'TX3LPaxmHKxFdv7VOQHJ'}`);
+    console.log(`   📝 Nikud: ENABLED (GPT-4 adds vowel points)`);
+    console.log(`   🎭 Voice: Balanced expressiveness (stability=0.4, style=0.6)`);
+    console.log(`   🌐 Language: Hebrew (language_code: 'he')`);
+    console.log(`   🎬 Stage Directions: ENABLED for human-like emotion`);
+    console.log(`🎯 State Machine: ENABLED (11-stage sales flow)`);
     console.log(`📊 n8n Webhook: ${this.n8nWebhook.enabled ? 'ENABLED' : 'DISABLED'}`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
   }
@@ -86,8 +89,8 @@ class ConversationPipelineV2 {
       // Get agent name from environment or default
       const agentName = process.env.AGENT_NAME || 'עדי';
 
-      // Warm, professional greeting - clean Hebrew without stage directions
-      const greetingText = `שלום! מדברת ${agentName}. נעים להכיר, איך קוראים לך?`;
+      // Warm, professional greeting with stage directions for human-like emotion
+      const greetingText = `[chuckles] שלום! מדברת ${agentName} [smiling] נעים להכיר, איך קוראים לך?`;
 
       // Add to conversation history
       this.memory.addMessage('agent', greetingText);
