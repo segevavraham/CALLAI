@@ -5,7 +5,7 @@ const WebSocket = require('ws');
 const EventEmitter = require('events');
 
 class ElevenLabsClient extends EventEmitter {
-  constructor(apiKey, voiceId = 'exsUS4vynmxd379XN4yO') {
+  constructor(apiKey, voiceId = 'TX3LPaxmHKxFdv7VOQHJ') {
     super();
     this.apiKey = apiKey;
     this.voiceId = voiceId; // Hebrew voice
@@ -159,7 +159,7 @@ class ElevenLabsClient extends EventEmitter {
  * Use when you have complete text upfront
  */
 class ElevenLabsHTTP {
-  constructor(apiKey, voiceId = 'exsUS4vynmxd379XN4yO', openaiApiKey = null) {
+  constructor(apiKey, voiceId = 'TX3LPaxmHKxFdv7VOQHJ', openaiApiKey = null) {
     this.apiKey = apiKey;
     this.voiceId = voiceId;
     this.baseUrl = 'https://api.elevenlabs.io/v1';
