@@ -159,10 +159,68 @@ class ElevenLabsClient extends EventEmitter {
  * Use when you have complete text upfront
  */
 class ElevenLabsHTTP {
-  constructor(apiKey, voiceId = 'exsUS4vynmxd379XN4yO') {
+  constructor(apiKey, voiceId = 'exsUS4vynmxd379XN4yO', openaiApiKey = null) {
     this.apiKey = apiKey;
     this.voiceId = voiceId;
     this.baseUrl = 'https://api.elevenlabs.io/v1';
+    this.openaiApiKey = openaiApiKey; // For Hebrew nikud
+  }
+
+  /**
+   * Add Hebrew nikud (vowel points) to text using GPT-4
+   * This dramatically improves TTS pronunciation accuracy
+   */
+  async addHebrewNikud(text) {
+    if (!this.openaiApiKey) {
+      console.log('⚠️  No OpenAI key - skipping nikud');
+      return text;
+    }
+
+    try {
+      console.log(`📝 Adding nikud to: "${text}"`);
+
+      const axios = require('axios');
+      const response = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4',
+          messages: [
+            {
+              role: 'system',
+              content: `אתה מומחה לניקוד עברי. תפקידך להוסיף ניקוד מדויק לטקסט עברי.
+
+חוקים:
+1. הוסף את כל סימני הניקוד (קמץ, פתח, צירה, סגול, חולם, שורוק, קובוץ, וכו')
+2. שמור על הטקסט המקורי - רק הוסף ניקוד
+3. ניקוד חייב להיות מדויק לפי הקשר המשפט
+4. החזר רק את הטקסט המנוקד, ללא הסברים`
+            },
+            {
+              role: 'user',
+              content: `נקד את הטקסט הבא בצורה מדויקת:\n\n${text}`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 500
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.openaiApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      );
+
+      const nikudText = response.data.choices[0].message.content.trim();
+      console.log(`   ✅ With nikud: "${nikudText}"`);
+      return nikudText;
+
+    } catch (error) {
+      console.error('❌ Failed to add nikud:', error.message);
+      // Fallback to original text
+      return text;
+    }
   }
 
   /**
@@ -172,18 +230,23 @@ class ElevenLabsHTTP {
   async textToSpeech(text) {
     const axios = require('axios');
 
+    // Add Hebrew nikud for better pronunciation
+    const nikudText = await this.addHebrewNikud(text);
+
     const url = `${this.baseUrl}/text-to-speech/${this.voiceId}`;
 
     const payload = {
-      text: text,
-      model_id: 'eleven_v3', // v3 with Hebrew support (HTTP only)
+      text: nikudText,
+      model_id: 'eleven_multilingual_v2', // Best for Hebrew with emotion
       voice_settings: {
-        stability: 0.5,
-        similarity_boost: 0.8,
-        style: 0.5,
-        use_speaker_boost: true
+        stability: 0.35,           // Lower = more expressive and emotional (was 0.5)
+        similarity_boost: 0.85,    // Higher = closer to original voice (was 0.8)
+        style: 0.65,               // Higher = more expressive delivery (was 0.5)
+        use_speaker_boost: true    // Enhance voice clarity
       }
     };
+
+    console.log(`🎵 TTS settings: stability=${payload.voice_settings.stability}, style=${payload.voice_settings.style}`);
 
     try {
       const response = await axios.post(url, payload, {
