@@ -83,8 +83,11 @@ class ConversationPipelineV2 {
     try {
       console.log('👋 Sending greeting message...');
 
-      // Get greeting from current stage (GREETING stage) - warm and natural
-      const greetingText = 'היי! נעים מאוד. איך קוראים לך?';
+      // Get agent name from environment or default
+      const agentName = process.env.AGENT_NAME || 'עדי';
+
+      // Warm, professional greeting - clean Hebrew without stage directions
+      const greetingText = `שלום! מדברת ${agentName}. נעים להכיר, איך קוראים לך?`;
 
       // Add to conversation history
       this.memory.addMessage('agent', greetingText);
