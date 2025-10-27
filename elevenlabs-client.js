@@ -35,19 +35,19 @@ class ElevenLabsClient extends EventEmitter {
         console.log('✅ Connected to ElevenLabs v3');
         this.isConnected = true;
 
-        // Send initial configuration with Alpha model settings + Hebrew language
+        // Send initial configuration with Hebrew language + expressive settings
         const config = {
           text: ' ',
           voice_settings: {
-            stability: 0.5,        // Lower = more expressive
-            similarity_boost: 0.8, // Higher = closer to original voice
-            style: 0.5,            // Alpha model style
+            stability: 0.4,        // Balanced for natural speech with emotion
+            similarity_boost: 0.85, // Maintain voice character
+            style: 0.6,            // Expressive delivery for human-like speech
             use_speaker_boost: true
           },
           generation_config: {
             chunk_length_schedule: [120, 160, 250, 290] // Optimized for streaming
           },
-          language_code: 'he',  // Hebrew language enforcement (ISO 639-1)
+          language_code: 'he',  // Force Hebrew language (ISO 639-1)
           xi_api_key: this.apiKey
         };
 
@@ -237,13 +237,14 @@ class ElevenLabsHTTP {
 
     const payload = {
       text: nikudText,
-      model_id: 'eleven_multilingual_v2', // Best for Hebrew with emotion
+      model_id: 'eleven_multilingual_v2', // v2 multilingual supports Hebrew with [stage directions]
       voice_settings: {
-        stability: 0.35,           // Lower = more expressive and emotional (was 0.5)
-        similarity_boost: 0.85,    // Higher = closer to original voice (was 0.8)
-        style: 0.65,               // Higher = more expressive delivery (was 0.5)
+        stability: 0.4,            // Balanced for natural speech with emotion
+        similarity_boost: 0.85,    // Maintain voice character
+        style: 0.6,                // Expressive delivery for human-like speech
         use_speaker_boost: true    // Enhance voice clarity
-      }
+      },
+      language_code: 'he'          // Force Hebrew language
     };
 
     console.log(`🎵 TTS settings: stability=${payload.voice_settings.stability}, style=${payload.voice_settings.style}`);
