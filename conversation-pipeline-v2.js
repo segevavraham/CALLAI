@@ -34,7 +34,7 @@ class ConversationPipelineV2 {
     // Initialize AI clients
     this.stt = new WhisperClient(config.openaiApiKey); // Use Whisper directly (more reliable)
     this.gpt4 = new GPT4StreamingClient(config.openaiApiKey);
-    this.tts = new ElevenLabsHTTP(config.elevenLabsApiKey, config.elevenLabsVoiceId);
+    this.tts = new ElevenLabsHTTP(config.elevenLabsApiKey, config.elevenLabsVoiceId, config.openaiApiKey); // With nikud support
 
     // n8n webhook
     this.n8nWebhook = new N8NWebhook(config.n8nWebhookUrl);
@@ -56,7 +56,9 @@ class ConversationPipelineV2 {
     console.log(`📞 Call ID: ${callSid}`);
     console.log(`🎤 STT: Whisper (OpenAI - proven reliable for Hebrew)`);
     console.log(`🤖 LLM: GPT-4 with context-aware prompts`);
-    console.log(`🎵 TTS: ElevenLabs v3 (natural Hebrew voice)`);
+    console.log(`🎵 TTS: ElevenLabs multilingual_v2 + Hebrew nikud (vowel points)`);
+    console.log(`   📝 Nikud: ENABLED (GPT-4 adds vowel points for perfect pronunciation)`);
+    console.log(`   🎭 Voice: High expressiveness (stability=0.35, style=0.65)`);
     console.log(`🎯 State Machine: ENABLED`);
     console.log(`📊 n8n Webhook: ${this.n8nWebhook.enabled ? 'ENABLED' : 'DISABLED'}`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
