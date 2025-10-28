@@ -22,8 +22,8 @@ class ElevenLabsClient extends EventEmitter {
       console.log(`🎤 Connecting to ElevenLabs v3 (voice: ${this.voiceId})...`);
 
       // ElevenLabs WebSocket URL for text-to-speech streaming
-      // Using eleven_turbo_v2_5 - fastest and highest quality for Hebrew
-      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_turbo_v2_5&optimize_streaming_latency=3`;
+      // Using eleven_v3 - most advanced model with best Hebrew support
+      const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_v3`;
 
       this.ws = new WebSocket(wsUrl, {
         headers: {
@@ -35,12 +35,13 @@ class ElevenLabsClient extends EventEmitter {
         console.log('✅ Connected to ElevenLabs v3');
         this.isConnected = true;
 
-        // Send initial configuration optimized for Hebrew quality
+        // Send initial configuration for v3 with Hebrew optimization
         const config = {
           text: ' ',
           voice_settings: {
             stability: 0.5,        // Balanced stability for clear, natural speech
-            similarity_boost: 0.75, // Natural voice similarity
+            similarity_boost: 0.8, // High similarity for authentic voice character
+            style: 0.5,            // Expressive delivery (v3 supports style)
             use_speaker_boost: true
           },
           generation_config: {
@@ -235,12 +236,12 @@ class ElevenLabsHTTP {
 
     const payload = {
       text: text,  // Use original text without nikud
-      model_id: 'eleven_turbo_v2_5', // Fastest, highest quality model with Hebrew support
+      model_id: 'eleven_v3', // v3: Most advanced model with best Hebrew support
       voice_settings: {
-        stability: 0.5,            // Balanced stability for clear speech
-        similarity_boost: 0.75,    // Natural voice similarity
-        style: 0.0,                // No extra style (v2_5 doesn't use this)
-        use_speaker_boost: true    // Enhance voice clarity
+        stability: 0.5,            // Balanced stability for clear, natural speech
+        similarity_boost: 0.8,     // High similarity for authentic voice character
+        style: 0.5,                // Expressive delivery (v3 supports style parameter)
+        use_speaker_boost: true    // Enhance voice clarity and presence
       }
     };
 

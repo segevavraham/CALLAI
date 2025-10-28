@@ -56,11 +56,11 @@ class ConversationPipelineV2 {
     console.log(`📞 Call ID: ${callSid}`);
     console.log(`🎤 STT: Whisper (OpenAI - proven reliable for Hebrew)`);
     console.log(`🤖 LLM: GPT-4 with stage directions ([chuckles], [laughing])`);
-    console.log(`🎵 TTS: ElevenLabs Turbo v2.5 (NO nikud - native Hebrew)`);
+    console.log(`🎵 TTS: ElevenLabs v3 (NO nikud - best Hebrew quality)`);
     console.log(`   🗣️  Voice ID: ${config.elevenLabsVoiceId || 'TX3LPaxmHKxFdv7VOQHJ'}`);
-    console.log(`   🎭 Voice: Natural quality (stability=0.5, similarity=0.75)`);
+    console.log(`   🎭 Voice: High quality (stability=0.5, similarity=0.8, style=0.5)`);
     console.log(`   🎬 Stage Directions: ENABLED for human-like emotion`);
-    console.log(`   ⚡ Latency: Optimized streaming (optimize_streaming_latency=3)`);
+    console.log(`   ⚠️  Latency: Higher (v3 optimized for quality over speed)`);
     console.log(`🎯 State Machine: ENABLED (11-stage sales flow)`);
     console.log(`📊 n8n Webhook: ${this.n8nWebhook.enabled ? 'ENABLED' : 'DISABLED'}`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
